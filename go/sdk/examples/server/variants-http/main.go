@@ -1,5 +1,6 @@
 // Example: A developer productivity platform (à la GitHub) that exposes
-// different tool sets for different agent types using MCP server variants.
+// different tool sets for different agent types using MCP server variants,
+// served over HTTP for multiple concurrent clients.
 //
 // Variants:
 //   - code-review: PR operations, diffs, and review comments
@@ -7,14 +8,16 @@
 //   - security-readonly: security scanning alerts and advisories (read-only)
 //   - ci-automation: CI/CD workflow management and dispatch
 //
-// Run over stdio:
+// Run:
 //
 //	go run .
+//
+// Then connect any MCP client to http://localhost:8080.
 package main
 
 import (
-	"context"
 	"log"
+	"net/http"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -101,8 +104,8 @@ func main() {
 			Status:      variants.Stable,
 		}, ciServer, 3)
 
-	ctx := context.Background()
-	if err := vs.Run(ctx, &mcp.StdioTransport{}); err != nil {
-		log.Fatal(err)
-	}
+	handler := variants.NewStreamableHTTPHandler(vs, nil)
+
+	log.Println("Listening on :8080")
+	log.Fatal(http.ListenAndServe(":8080", handler))
 }

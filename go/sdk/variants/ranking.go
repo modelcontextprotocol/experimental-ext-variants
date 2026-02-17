@@ -12,15 +12,17 @@ import (
 // defaultRankingFunc is the built-in ranking function used when no custom
 // RankingFunc is provided. It sorts variants by priority (lowest first),
 // using stable-before-experimental-before-deprecated as a tiebreaker.
+//
+// The input slice is already a copy (from RankedVariants), so sorting
+// in place is safe.
 func defaultRankingFunc(_ context.Context, _ VariantHints, vs []ServerVariant) []ServerVariant {
-	ranked := slices.Clone(vs)
-	slices.SortStableFunc(ranked, func(a, b ServerVariant) int {
+	slices.SortStableFunc(vs, func(a, b ServerVariant) int {
 		if a.Priority() != b.Priority() {
 			return a.Priority() - b.Priority()
 		}
 		return statusWeight(a.Status) - statusWeight(b.Status)
 	})
-	return ranked
+	return vs
 }
 
 // statusWeight returns a sort weight for a VariantStatus.
