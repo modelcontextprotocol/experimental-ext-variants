@@ -6,6 +6,14 @@ package variants
 
 import "context"
 
+const (
+	// Extension ID for variant capability negotiation (plural)
+	extensionID = "io.modelcontextprotocol/server-variants"
+
+	// Per-request _meta key for variant selection (singular)
+	metaKeyVariant = "io.modelcontextprotocol/server-variant"
+)
+
 // ---------------------------------------------------------------------------
 // Variant status
 // ---------------------------------------------------------------------------
