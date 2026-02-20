@@ -138,10 +138,7 @@ In **stateful mode** (default, stdio and HTTP), per-session inner connections ar
 
 ## Examples
 
-See [`examples/server/`](examples/server/) for runnable examples:
-
-- [`variants/`](examples/server/variants/) — stdio transport (single client)
-- [`variants-http/`](examples/server/variants-http/) — HTTP transport (multiple concurrent clients)
+See [`examples/server/`](examples/server/) for runnable examples.
 
 ## API
 
