@@ -1,12 +1,4 @@
-// Package exampletools defines the shared tool types and handlers used by the
-// variant-aware MCP server examples. The tools simulate a developer
-// productivity platform (à la GitHub/GitLab) with four variants:
-//
-//   - code-review: PR operations, diffs, and review comments
-//   - project-management: issue tracking, labels, and assignments
-//   - security-readonly: security scanning alerts and advisories (read-only)
-//   - ci-automation: CI/CD workflow management and dispatch
-package exampletools
+package main
 
 import (
 	"context"
@@ -34,7 +26,7 @@ type ListPullRequestsOutput struct {
 	PullRequests []PullRequest `json:"pullRequests"`
 }
 
-func ListPullRequests(_ context.Context, _ *mcp.CallToolRequest, in ListPullRequestsInput) (*mcp.CallToolResult, ListPullRequestsOutput, error) {
+func listPullRequests(_ context.Context, _ *mcp.CallToolRequest, in ListPullRequestsInput) (*mcp.CallToolResult, ListPullRequestsOutput, error) {
 	return nil, ListPullRequestsOutput{
 		PullRequests: []PullRequest{
 			{Number: 42, Title: "Add retry logic to API client", Author: "alice", State: "open"},
@@ -56,7 +48,7 @@ type GetDiffOutput struct {
 	Deletions int      `json:"deletions"`
 }
 
-func GetDiff(_ context.Context, _ *mcp.CallToolRequest, in GetDiffInput) (*mcp.CallToolResult, GetDiffOutput, error) {
+func getDiff(_ context.Context, _ *mcp.CallToolRequest, in GetDiffInput) (*mcp.CallToolResult, GetDiffOutput, error) {
 	return nil, GetDiffOutput{
 		Diff:      "--- a/client.go\n+++ b/client.go\n@@ -45,6 +45,12 @@\n+  for attempt := 0; attempt < maxRetries; attempt++ {\n+    resp, err := c.do(req)\n+    if err == nil { return resp, nil }\n+    time.Sleep(backoff(attempt))\n+  }",
 		Files:     []string{"client.go", "client_test.go"},
@@ -78,7 +70,7 @@ type AddReviewCommentOutput struct {
 	URL       string `json:"url"`
 }
 
-func AddReviewComment(_ context.Context, _ *mcp.CallToolRequest, in AddReviewCommentInput) (*mcp.CallToolResult, AddReviewCommentOutput, error) {
+func addReviewComment(_ context.Context, _ *mcp.CallToolRequest, in AddReviewCommentInput) (*mcp.CallToolResult, AddReviewCommentOutput, error) {
 	return nil, AddReviewCommentOutput{
 		CommentID: 1001,
 		URL:       fmt.Sprintf("https://github.com/%s/pull/%d#discussion_r1001", in.Repo, in.Number),
@@ -105,7 +97,7 @@ type ListIssuesOutput struct {
 	Issues []Issue `json:"issues"`
 }
 
-func ListIssues(_ context.Context, _ *mcp.CallToolRequest, in ListIssuesInput) (*mcp.CallToolResult, ListIssuesOutput, error) {
+func listIssues(_ context.Context, _ *mcp.CallToolRequest, in ListIssuesInput) (*mcp.CallToolResult, ListIssuesOutput, error) {
 	return nil, ListIssuesOutput{
 		Issues: []Issue{
 			{Number: 101, Title: "API rate limiting returns wrong status code", State: "open", Labels: []string{"bug", "api"}, Assignee: "alice"},
@@ -127,7 +119,7 @@ type CreateIssueOutput struct {
 	URL    string `json:"url"`
 }
 
-func CreateIssue(_ context.Context, _ *mcp.CallToolRequest, in CreateIssueInput) (*mcp.CallToolResult, CreateIssueOutput, error) {
+func createIssue(_ context.Context, _ *mcp.CallToolRequest, in CreateIssueInput) (*mcp.CallToolResult, CreateIssueOutput, error) {
 	return nil, CreateIssueOutput{
 		Number: 102,
 		URL:    fmt.Sprintf("https://github.com/%s/issues/102", in.Repo),
@@ -144,7 +136,7 @@ type AddLabelOutput struct {
 	Labels []string `json:"currentLabels"`
 }
 
-func AddLabel(_ context.Context, _ *mcp.CallToolRequest, in AddLabelInput) (*mcp.CallToolResult, AddLabelOutput, error) {
+func addLabel(_ context.Context, _ *mcp.CallToolRequest, in AddLabelInput) (*mcp.CallToolResult, AddLabelOutput, error) {
 	return nil, AddLabelOutput{
 		Labels: append([]string{"bug", "api"}, in.Labels...),
 	}, nil
@@ -170,7 +162,7 @@ type ListSecurityAlertsOutput struct {
 	Alerts []SecurityAlert `json:"alerts"`
 }
 
-func ListSecurityAlerts(_ context.Context, _ *mcp.CallToolRequest, in ListSecurityAlertsInput) (*mcp.CallToolResult, ListSecurityAlertsOutput, error) {
+func listSecurityAlerts(_ context.Context, _ *mcp.CallToolRequest, in ListSecurityAlertsInput) (*mcp.CallToolResult, ListSecurityAlertsOutput, error) {
 	return nil, ListSecurityAlertsOutput{
 		Alerts: []SecurityAlert{
 			{Number: 1, Rule: "sql-injection", Severity: "critical", State: "open", Path: "src/db/query.go"},
@@ -193,7 +185,7 @@ type GetAdvisoryOutput struct {
 	PatchedIn   string   `json:"patchedIn"`
 }
 
-func GetAdvisory(_ context.Context, _ *mcp.CallToolRequest, in GetAdvisoryInput) (*mcp.CallToolResult, GetAdvisoryOutput, error) {
+func getAdvisory(_ context.Context, _ *mcp.CallToolRequest, in GetAdvisoryInput) (*mcp.CallToolResult, GetAdvisoryOutput, error) {
 	return nil, GetAdvisoryOutput{
 		ID:          in.AdvisoryID,
 		Summary:     "Remote code execution via crafted request payload",
@@ -224,7 +216,7 @@ type ListWorkflowRunsOutput struct {
 	Runs []WorkflowRun `json:"runs"`
 }
 
-func ListWorkflowRuns(_ context.Context, _ *mcp.CallToolRequest, in ListWorkflowRunsInput) (*mcp.CallToolResult, ListWorkflowRunsOutput, error) {
+func listWorkflowRuns(_ context.Context, _ *mcp.CallToolRequest, in ListWorkflowRunsInput) (*mcp.CallToolResult, ListWorkflowRunsOutput, error) {
 	return nil, ListWorkflowRunsOutput{
 		Runs: []WorkflowRun{
 			{ID: 5001, Workflow: "ci.yml", Status: "completed", Conclusion: "success", Branch: "main"},
@@ -246,7 +238,7 @@ type TriggerWorkflowOutput struct {
 	URL   string `json:"url"`
 }
 
-func TriggerWorkflow(_ context.Context, _ *mcp.CallToolRequest, in TriggerWorkflowInput) (*mcp.CallToolResult, TriggerWorkflowOutput, error) {
+func triggerWorkflow(_ context.Context, _ *mcp.CallToolRequest, in TriggerWorkflowInput) (*mcp.CallToolResult, TriggerWorkflowOutput, error) {
 	return nil, TriggerWorkflowOutput{
 		RunID: 5004,
 		URL:   fmt.Sprintf("https://github.com/%s/actions/runs/5004", in.Repo),

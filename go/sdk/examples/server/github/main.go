@@ -1,6 +1,10 @@
-// Example: A developer productivity platform (à la GitHub) that exposes
-// different tool sets for different agent types using MCP server variants,
-// served over HTTP for multiple concurrent clients.
+// Example: GitHub MCP Server — a developer productivity platform that exposes
+// different tool sets for different agent types using MCP server variants.
+// This mirrors the GitHub MCP Server pattern described in SEP-2053's Prior Art
+// section, where a single server exposes code review, project management,
+// security, and CI/CD tools as separate variants with custom ranking.
+//
+// Capability demonstrated: Different tool sets per variant, custom ranking.
 //
 // Variants:
 //   - code-review: PR operations, diffs, and review comments
@@ -10,18 +14,20 @@
 //
 // Run:
 //
-//	go run .
+//	go run ./examples/server/github
 //
 // Then connect any MCP client to http://localhost:8080.
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
+	"slices"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/modelcontextprotocol/experimental-ext-variants/go/sdk/examples/server/exampletools"
 	"github.com/modelcontextprotocol/experimental-ext-variants/go/sdk/variants"
 )
 
@@ -31,52 +37,52 @@ func main() {
 	mcp.AddTool(codeReviewServer, &mcp.Tool{
 		Name:        "list_pull_requests",
 		Description: "List open pull requests, optionally filtered by author",
-	}, exampletools.ListPullRequests)
+	}, listPullRequests)
 	mcp.AddTool(codeReviewServer, &mcp.Tool{
 		Name:        "get_diff",
 		Description: "Get the diff for a pull request, including changed files and line counts",
-	}, exampletools.GetDiff)
+	}, getDiff)
 	mcp.AddTool(codeReviewServer, &mcp.Tool{
 		Name:        "add_review_comment",
 		Description: "Post a review comment on a specific line of a pull request",
-	}, exampletools.AddReviewComment)
+	}, addReviewComment)
 
 	// Project management variant: issue-focused tools for PM agents
 	pmServer := mcp.NewServer(&mcp.Implementation{Name: "devplatform", Version: "v1.0.0"}, nil)
 	mcp.AddTool(pmServer, &mcp.Tool{
 		Name:        "list_issues",
 		Description: "List issues, optionally filtered by state and labels",
-	}, exampletools.ListIssues)
+	}, listIssues)
 	mcp.AddTool(pmServer, &mcp.Tool{
 		Name:        "create_issue",
 		Description: "Create a new issue with title, body, and optional labels",
-	}, exampletools.CreateIssue)
+	}, createIssue)
 	mcp.AddTool(pmServer, &mcp.Tool{
 		Name:        "add_label",
 		Description: "Add labels to an existing issue",
-	}, exampletools.AddLabel)
+	}, addLabel)
 
 	// Security variant: read-only security scanning tools
 	securityServer := mcp.NewServer(&mcp.Implementation{Name: "devplatform", Version: "v1.0.0"}, nil)
 	mcp.AddTool(securityServer, &mcp.Tool{
 		Name:        "list_security_alerts",
 		Description: "List code scanning alerts for a repository",
-	}, exampletools.ListSecurityAlerts)
+	}, listSecurityAlerts)
 	mcp.AddTool(securityServer, &mcp.Tool{
 		Name:        "get_advisory",
 		Description: "Get details of a security advisory",
-	}, exampletools.GetAdvisory)
+	}, getAdvisory)
 
 	// CI/CD variant: workflow management tools for automation agents
 	ciServer := mcp.NewServer(&mcp.Implementation{Name: "devplatform", Version: "v1.0.0"}, nil)
 	mcp.AddTool(ciServer, &mcp.Tool{
 		Name:        "list_workflow_runs",
 		Description: "List recent workflow runs for a repository",
-	}, exampletools.ListWorkflowRuns)
+	}, listWorkflowRuns)
 	mcp.AddTool(ciServer, &mcp.Tool{
 		Name:        "trigger_workflow",
 		Description: "Trigger a workflow dispatch event",
-	}, exampletools.TriggerWorkflow)
+	}, triggerWorkflow)
 
 	vs := variants.NewServer(&mcp.Implementation{Name: "devplatform", Version: "v1.0.0"}).
 		WithVariant(variants.ServerVariant{
@@ -102,7 +108,23 @@ func main() {
 			Description: "CI/CD workflow management. Trigger runs, monitor jobs, manage deployments designed for automation agents.",
 			Hints:       map[string]string{"domain": "ci-cd", "accessLevel": "automation"},
 			Status:      variants.Stable,
-		}, ciServer, 3)
+		}, ciServer, 3).
+		// Custom ranking: boost variants whose "domain" hint matches the client's.
+		WithRanking(func(_ context.Context, hints variants.VariantHints, vs []variants.ServerVariant) []variants.ServerVariant {
+			requested, _ := variants.HintValue[string](hints, "domain")
+			slices.SortStableFunc(vs, func(a, b variants.ServerVariant) int {
+				aMatch := strings.Contains(strings.ToLower(a.Hints["domain"]), strings.ToLower(requested))
+				bMatch := strings.Contains(strings.ToLower(b.Hints["domain"]), strings.ToLower(requested))
+				if aMatch != bMatch {
+					if aMatch {
+						return -1
+					}
+					return 1
+				}
+				return a.Priority() - b.Priority()
+			})
+			return vs
+		})
 
 	handler := variants.NewStreamableHTTPHandler(vs, nil)
 
