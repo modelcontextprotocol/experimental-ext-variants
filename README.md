@@ -13,6 +13,34 @@ This repository provides a multi-language reference implementation of the varian
 | TypeScript | `typescript/sdk/` | `@ext-modelcontextprotocol/variants` | Planned |
 
 
+## Examples (Go)
+
+The Go implementation includes runnable example servers under [`go/sdk/examples/server/`](go/sdk/examples/server/):
+
+### [`model-optimized/`](go/sdk/examples/server/model-optimized/)
+
+Same tools, different descriptions per LLM family.
+
+https://github.com/user-attachments/assets/5bb60cd2-291f-4940-abfe-f53852d35470
+
+### [`github/`](go/sdk/examples/server/github/)
+
+Different tool sets per variant with custom ranking.
+
+https://github.com/user-attachments/assets/d770ac55-e988-4d89-bdf8-bcb3cf1e2e53
+
+### [`research/`](go/sdk/examples/server/research/)
+
+Context budget management via description verbosity.
+
+### [`trading/`](go/sdk/examples/server/trading/)
+
+API versioning, lifecycle statuses, and deprecation info.
+
+### [`variants-stdio/`](go/sdk/examples/server/variants-stdio/)
+
+Minimal single-variant setup.
+
 ## CI/CD
 
 This monorepo uses **path-based CI workflows** to efficiently test only what changes:
