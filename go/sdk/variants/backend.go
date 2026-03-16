@@ -48,7 +48,7 @@ type inMemoryBackend struct {
 
 	// serverHandler is the inner server's handler chain, captured via
 	// middleware so we can bypass the transport and preserve context values.
-	captureOnce   sync.Once
+	captureOnce      sync.Once
 	mcpMethodHandler mcp.MethodHandler
 }
 

@@ -19,8 +19,8 @@ import (
 // server. In stateful mode one is created per client session; in
 // stateless mode a single instance is shared across all requests.
 type innerConnection struct {
-	backendSession   *backendSession
-	cleanupFn func()
+	backendSession *backendSession
+	cleanupFn      func()
 }
 
 // close invokes the backend-specific cleanup function which tears down
