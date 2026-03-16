@@ -274,8 +274,8 @@ func (d *dispatcher) handleCall(ctx context.Context, method string, req mcp.Requ
 		return nil, err
 	}
 
-	handler := conn.backendSession
-	variantID := handler.variantID
+	backendSession := conn.backendSession
+	variantID := backendSession.variantID
 	params := req.GetParams()
 	extra := req.GetExtra()
 	var result mcp.Result
@@ -290,7 +290,7 @@ func (d *dispatcher) handleCall(ctx context.Context, method string, req mcp.Requ
 			}
 		}
 		injectVariantMeta(raw, variantID)
-		result, err = handler.CallTool(ctx, raw, extra)
+		result, err = backendSession.CallTool(ctx, raw, extra)
 	case "resources/read":
 		p, _ := params.(*mcp.ReadResourceParams)
 		if p == nil {
@@ -300,7 +300,7 @@ func (d *dispatcher) handleCall(ctx context.Context, method string, req mcp.Requ
 			}
 		}
 		injectVariantMeta(p, variantID)
-		result, err = handler.ReadResource(ctx, p, extra)
+		result, err = backendSession.ReadResource(ctx, p, extra)
 	case "prompts/get":
 		p, _ := params.(*mcp.GetPromptParams)
 		if p == nil {
@@ -310,7 +310,7 @@ func (d *dispatcher) handleCall(ctx context.Context, method string, req mcp.Requ
 			}
 		}
 		injectVariantMeta(p, variantID)
-		result, err = handler.GetPrompt(ctx, p, extra)
+		result, err = backendSession.GetPrompt(ctx, p, extra)
 	default:
 		return nil, errors.New("unsupported call method: " + method)
 	}
@@ -356,7 +356,7 @@ func (d *dispatcher) handleUnsubscribe(ctx context.Context, req mcp.Request) (mc
 		return nil, err
 	}
 
-	handler := conn.backendSession
+	backendSession := conn.backendSession
 	params, _ := req.GetParams().(*mcp.UnsubscribeParams)
 	if params == nil {
 		return nil, &jsonrpc.Error{
@@ -364,9 +364,9 @@ func (d *dispatcher) handleUnsubscribe(ctx context.Context, req mcp.Request) (mc
 			Message: "missing or invalid resources/unsubscribe params",
 		}
 	}
-	injectVariantMeta(params, handler.variantID)
-	if err := handler.Unsubscribe(ctx, params, req.GetExtra()); err != nil {
-		return nil, enrichError(err, handler.variantID)
+	injectVariantMeta(params, backendSession.variantID)
+	if err := backendSession.Unsubscribe(ctx, params, req.GetExtra()); err != nil {
+		return nil, enrichError(err, backendSession.variantID)
 	}
 	return nil, nil
 }
@@ -382,7 +382,7 @@ func (d *dispatcher) handleCompletion(ctx context.Context, req mcp.Request) (mcp
 		return nil, err
 	}
 
-	handler := conn.backendSession
+	backendSession := conn.backendSession
 	params, _ := req.GetParams().(*mcp.CompleteParams)
 	if params == nil {
 		return nil, &jsonrpc.Error{
@@ -390,10 +390,10 @@ func (d *dispatcher) handleCompletion(ctx context.Context, req mcp.Request) (mcp
 			Message: "missing or invalid completion/complete params",
 		}
 	}
-	injectVariantMeta(params, handler.variantID)
-	result, err := handler.Complete(ctx, params, req.GetExtra())
+	injectVariantMeta(params, backendSession.variantID)
+	result, err := backendSession.Complete(ctx, params, req.GetExtra())
 	if err != nil {
-		return nil, enrichError(err, handler.variantID)
+		return nil, enrichError(err, backendSession.variantID)
 	}
 	return result, nil
 }
