@@ -78,7 +78,6 @@ func (s *backendSession) ListResourceTemplates(ctx context.Context, p *mcp.ListR
 }
 
 func (s *backendSession) CallTool(ctx context.Context, p *mcp.CallToolParamsRaw, extra *mcp.RequestExtra) (*mcp.CallToolResult, error) {
-	injectVariantMeta(p, s.variantID)
 	result, err := s.mcpMethodHandler(ctx, "tools/call", &mcp.CallToolRequest{Session: s.serverSession, Params: p, Extra: extra})
 	if err != nil {
 		return nil, err
@@ -88,7 +87,6 @@ func (s *backendSession) CallTool(ctx context.Context, p *mcp.CallToolParamsRaw,
 }
 
 func (s *backendSession) ReadResource(ctx context.Context, p *mcp.ReadResourceParams, extra *mcp.RequestExtra) (*mcp.ReadResourceResult, error) {
-	injectVariantMeta(p, s.variantID)
 	result, err := s.mcpMethodHandler(ctx, "resources/read", &mcp.ReadResourceRequest{Session: s.serverSession, Params: p, Extra: extra})
 	if err != nil {
 		return nil, err
@@ -98,7 +96,6 @@ func (s *backendSession) ReadResource(ctx context.Context, p *mcp.ReadResourcePa
 }
 
 func (s *backendSession) GetPrompt(ctx context.Context, p *mcp.GetPromptParams, extra *mcp.RequestExtra) (*mcp.GetPromptResult, error) {
-	injectVariantMeta(p, s.variantID)
 	result, err := s.mcpMethodHandler(ctx, "prompts/get", &mcp.GetPromptRequest{Session: s.serverSession, Params: p, Extra: extra})
 	if err != nil {
 		return nil, err

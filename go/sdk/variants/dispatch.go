@@ -176,12 +176,15 @@ func (d *dispatcher) handleList(ctx context.Context, method string, req mcp.Requ
 	switch method {
 	case "tools/list":
 		p, _ := params.(*mcp.ListToolsParams)
-		if p != nil && p.Cursor != "" {
-			innerCursor, err := unwrapCursor(p.Cursor, variantID)
-			if err != nil {
-				return nil, err
+		if p != nil {
+			injectVariantMeta(p, variantID)
+			if p.Cursor != "" {
+				innerCursor, err := unwrapCursor(p.Cursor, variantID)
+				if err != nil {
+					return nil, err
+				}
+				p.Cursor = innerCursor
 			}
-			p.Cursor = innerCursor
 		}
 		result, err := backendSession.ListTools(ctx, p, extra)
 		if err != nil {
@@ -194,12 +197,15 @@ func (d *dispatcher) handleList(ctx context.Context, method string, req mcp.Requ
 
 	case "resources/list":
 		p, _ := params.(*mcp.ListResourcesParams)
-		if p != nil && p.Cursor != "" {
-			innerCursor, err := unwrapCursor(p.Cursor, variantID)
-			if err != nil {
-				return nil, err
+		if p != nil {
+			injectVariantMeta(p, variantID)
+			if p.Cursor != "" {
+				innerCursor, err := unwrapCursor(p.Cursor, variantID)
+				if err != nil {
+					return nil, err
+				}
+				p.Cursor = innerCursor
 			}
-			p.Cursor = innerCursor
 		}
 		result, err := backendSession.ListResources(ctx, p, extra)
 		if err != nil {
@@ -212,12 +218,15 @@ func (d *dispatcher) handleList(ctx context.Context, method string, req mcp.Requ
 
 	case "prompts/list":
 		p, _ := params.(*mcp.ListPromptsParams)
-		if p != nil && p.Cursor != "" {
-			innerCursor, err := unwrapCursor(p.Cursor, variantID)
-			if err != nil {
-				return nil, err
+		if p != nil {
+			injectVariantMeta(p, variantID)
+			if p.Cursor != "" {
+				innerCursor, err := unwrapCursor(p.Cursor, variantID)
+				if err != nil {
+					return nil, err
+				}
+				p.Cursor = innerCursor
 			}
-			p.Cursor = innerCursor
 		}
 		result, err := backendSession.ListPrompts(ctx, p, extra)
 		if err != nil {
@@ -230,12 +239,15 @@ func (d *dispatcher) handleList(ctx context.Context, method string, req mcp.Requ
 
 	case "resources/templates/list":
 		p, _ := params.(*mcp.ListResourceTemplatesParams)
-		if p != nil && p.Cursor != "" {
-			innerCursor, err := unwrapCursor(p.Cursor, variantID)
-			if err != nil {
-				return nil, err
+		if p != nil {
+			injectVariantMeta(p, variantID)
+			if p.Cursor != "" {
+				innerCursor, err := unwrapCursor(p.Cursor, variantID)
+				if err != nil {
+					return nil, err
+				}
+				p.Cursor = innerCursor
 			}
-			p.Cursor = innerCursor
 		}
 		result, err := backendSession.ListResourceTemplates(ctx, p, extra)
 		if err != nil {
@@ -277,6 +289,7 @@ func (d *dispatcher) handleCall(ctx context.Context, method string, req mcp.Requ
 				Message: "missing or invalid tools/call params",
 			}
 		}
+		injectVariantMeta(raw, variantID)
 		result, err = handler.CallTool(ctx, raw, extra)
 	case "resources/read":
 		p, _ := params.(*mcp.ReadResourceParams)
@@ -286,6 +299,7 @@ func (d *dispatcher) handleCall(ctx context.Context, method string, req mcp.Requ
 				Message: "missing or invalid resources/read params",
 			}
 		}
+		injectVariantMeta(p, variantID)
 		result, err = handler.ReadResource(ctx, p, extra)
 	case "prompts/get":
 		p, _ := params.(*mcp.GetPromptParams)
@@ -295,6 +309,7 @@ func (d *dispatcher) handleCall(ctx context.Context, method string, req mcp.Requ
 				Message: "missing or invalid prompts/get params",
 			}
 		}
+		injectVariantMeta(p, variantID)
 		result, err = handler.GetPrompt(ctx, p, extra)
 	default:
 		return nil, errors.New("unsupported call method: " + method)
@@ -317,7 +332,7 @@ func (d *dispatcher) handleSubscribe(ctx context.Context, req mcp.Request) (mcp.
 		return nil, err
 	}
 
-	handler := conn.backendSession
+	backendSession := conn.backendSession
 	params, _ := req.GetParams().(*mcp.SubscribeParams)
 	if params == nil {
 		return nil, &jsonrpc.Error{
@@ -325,8 +340,9 @@ func (d *dispatcher) handleSubscribe(ctx context.Context, req mcp.Request) (mcp.
 			Message: "missing or invalid resources/subscribe params",
 		}
 	}
-	if err := handler.Subscribe(ctx, params, req.GetExtra()); err != nil {
-		return nil, enrichError(err, handler.variantID)
+	injectVariantMeta(params, backendSession.variantID)
+	if err := backendSession.Subscribe(ctx, params, req.GetExtra()); err != nil {
+		return nil, enrichError(err, backendSession.variantID)
 	}
 	return nil, nil
 }
@@ -348,6 +364,7 @@ func (d *dispatcher) handleUnsubscribe(ctx context.Context, req mcp.Request) (mc
 			Message: "missing or invalid resources/unsubscribe params",
 		}
 	}
+	injectVariantMeta(params, handler.variantID)
 	if err := handler.Unsubscribe(ctx, params, req.GetExtra()); err != nil {
 		return nil, enrichError(err, handler.variantID)
 	}
@@ -373,6 +390,7 @@ func (d *dispatcher) handleCompletion(ctx context.Context, req mcp.Request) (mcp
 			Message: "missing or invalid completion/complete params",
 		}
 	}
+	injectVariantMeta(params, handler.variantID)
 	result, err := handler.Complete(ctx, params, req.GetExtra())
 	if err != nil {
 		return nil, enrichError(err, handler.variantID)
