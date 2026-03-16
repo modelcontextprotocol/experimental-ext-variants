@@ -6,6 +6,7 @@ package variants
 
 import (
 	"context"
+	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -44,13 +45,32 @@ type backend interface {
 // expose generic notification sending on ServerSession.
 type inMemoryBackend struct {
 	server *mcp.Server
+
+	// serverHandler is the inner server's handler chain, captured via
+	// middleware so we can bypass the transport and preserve context values.
+	captureOnce   sync.Once
+	mcpMethodHandler mcp.MethodHandler
 }
 
-// connect creates an in-memory transport pair, connects the inner server,
-// and creates a proxy client to communicate with it. Notifications for
-// progress and logging are forwarded directly to the front session with
-// _meta variant ID injection.
+// captureMCPMethodHandler registers a middleware that captures the inner
+// server's handler chain. Called once; the capture runs synchronously
+// inside Connect before it returns.
+func (b *inMemoryBackend) captureMCPMethodHandler() {
+	b.captureOnce.Do(func() {
+		b.server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
+			b.mcpMethodHandler = next
+			return next
+		})
+	})
+}
+
+// connect creates an in-memory transport pair and connects the inner server.
+// Requests bypass the transport via serverHandler to preserve context values.
+// The transport is kept alive only for notification forwarding (progress,
+// logging) from the inner server to the front client.
 func (b *inMemoryBackend) connect(ctx context.Context, variant ServerVariant, frontSession *mcp.ServerSession) (*innerConnection, error) {
+	b.captureMCPMethodHandler()
+
 	serverTransport, clientSideTransport := mcp.NewInMemoryTransports()
 
 	serverSession, err := b.server.Connect(ctx, serverTransport, nil)
@@ -87,8 +107,13 @@ func (b *inMemoryBackend) connect(ctx context.Context, variant ServerVariant, fr
 	}
 
 	return &innerConnection{
-		clientSession: clientSession,
+		backendSession: &backendSession{
+			variantID:        variant.ID,
+			serverSession:    serverSession,
+			mcpMethodHandler: b.mcpMethodHandler,
+		},
 		cleanupFn: func() {
+			clientSession.Close()
 			serverSession.Close()
 		},
 	}, nil
