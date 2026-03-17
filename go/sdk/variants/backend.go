@@ -6,7 +6,6 @@ package variants
 
 import (
 	"context"
-	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -45,28 +44,26 @@ type backend interface {
 // expose generic notification sending on ServerSession.
 type inMemoryBackend struct {
 	server *mcp.Server
-
-	// serverHandler is the inner server's handler chain, captured via
-	// middleware so we can bypass the transport and preserve context values.
-	captureOnce      sync.Once
-	mcpMethodHandler mcp.MethodHandler
 }
 
-// captureMCPMethodHandler captures a reference to the inner server's
-// handler chain. This is a workaround using AddReceivingMiddleware to
-// gain reference to mcp.Server.receivingMethodHandler_ since the SDK
-// does not expose a public accessor for it.
-// This can be replaced once the SDK exposes a public accessor for the
-// receiving handler chain.
-// The middleware itself is a no-op (returns next unmodified). Called
-// once; the capture runs synchronously during AddReceivingMiddleware.
-func (b *inMemoryBackend) captureMCPMethodHandler() {
-	b.captureOnce.Do(func() {
-		b.server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
-			b.mcpMethodHandler = next
-			return next
-		})
+// captureMCPMethodHandler captures and returns a reference to the inner
+// server's handler chain. This is a workaround using AddReceivingMiddleware
+// to gain a reference to mcp.Server.receivingMethodHandler_, since the SDK
+// does not expose a public accessor for it. This can be replaced once the
+// SDK exposes a public accessor for the receiving handler chain.
+func captureMCPMethodHandler(server *mcp.Server) mcp.MethodHandler {
+	var handler mcp.MethodHandler
+
+	// The middleware is identity (returns next unmodified), so the handler
+	// chain is unchanged, no extra hop introduced even if called multiple times.
+	server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
+		handler = next
+		return next
 	})
+	if handler == nil {
+		panic("failed to capture MCP Method Handler, it should be called after all other middleware are configured")
+	}
+	return handler
 }
 
 // connect creates an in-memory transport pair and connects the inner server.
@@ -74,7 +71,7 @@ func (b *inMemoryBackend) captureMCPMethodHandler() {
 // The transport is kept alive only for notification forwarding (progress,
 // logging) from the inner server to the front client.
 func (b *inMemoryBackend) connect(ctx context.Context, variant ServerVariant, frontSession *mcp.ServerSession) (*innerConnection, error) {
-	b.captureMCPMethodHandler()
+	mcpMethodHandler := captureMCPMethodHandler(b.server)
 
 	serverTransport, clientSideTransport := mcp.NewInMemoryTransports()
 
@@ -115,7 +112,7 @@ func (b *inMemoryBackend) connect(ctx context.Context, variant ServerVariant, fr
 		backendSession: &backendSession{
 			variantID:        variant.ID,
 			serverSession:    serverSession,
-			mcpMethodHandler: b.mcpMethodHandler,
+			mcpMethodHandler: mcpMethodHandler,
 		},
 		cleanupFn: func() {
 			clientSession.Close()

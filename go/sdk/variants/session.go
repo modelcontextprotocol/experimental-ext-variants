@@ -6,6 +6,7 @@ package variants
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -46,7 +47,10 @@ func (s *backendSession) ListTools(ctx context.Context, p *mcp.ListToolsParams, 
 	if err != nil {
 		return nil, err
 	}
-	r, _ := result.(*mcp.ListToolsResult)
+	r, ok := result.(*mcp.ListToolsResult)
+	if !ok && result != nil {
+		return nil, fmt.Errorf("unexpected result type %T for tools/list", result)
+	}
 	return r, nil
 }
 
@@ -55,7 +59,10 @@ func (s *backendSession) ListResources(ctx context.Context, p *mcp.ListResources
 	if err != nil {
 		return nil, err
 	}
-	r, _ := result.(*mcp.ListResourcesResult)
+	r, ok := result.(*mcp.ListResourcesResult)
+	if !ok && result != nil {
+		return nil, fmt.Errorf("unexpected result type %T for resources/list", result)
+	}
 	return r, nil
 }
 
@@ -64,7 +71,10 @@ func (s *backendSession) ListPrompts(ctx context.Context, p *mcp.ListPromptsPara
 	if err != nil {
 		return nil, err
 	}
-	r, _ := result.(*mcp.ListPromptsResult)
+	r, ok := result.(*mcp.ListPromptsResult)
+	if !ok && result != nil {
+		return nil, fmt.Errorf("unexpected result type %T for prompts/list", result)
+	}
 	return r, nil
 }
 
@@ -73,7 +83,10 @@ func (s *backendSession) ListResourceTemplates(ctx context.Context, p *mcp.ListR
 	if err != nil {
 		return nil, err
 	}
-	r, _ := result.(*mcp.ListResourceTemplatesResult)
+	r, ok := result.(*mcp.ListResourceTemplatesResult)
+	if !ok && result != nil {
+		return nil, fmt.Errorf("unexpected result type %T for resources/templates/list", result)
+	}
 	return r, nil
 }
 
@@ -82,7 +95,10 @@ func (s *backendSession) CallTool(ctx context.Context, p *mcp.CallToolParamsRaw,
 	if err != nil {
 		return nil, err
 	}
-	r, _ := result.(*mcp.CallToolResult)
+	r, ok := result.(*mcp.CallToolResult)
+	if !ok && result != nil {
+		return nil, fmt.Errorf("unexpected result type %T for tools/call", result)
+	}
 	return r, nil
 }
 
@@ -91,7 +107,10 @@ func (s *backendSession) ReadResource(ctx context.Context, p *mcp.ReadResourcePa
 	if err != nil {
 		return nil, err
 	}
-	r, _ := result.(*mcp.ReadResourceResult)
+	r, ok := result.(*mcp.ReadResourceResult)
+	if !ok && result != nil {
+		return nil, fmt.Errorf("unexpected result type %T for resources/read", result)
+	}
 	return r, nil
 }
 
@@ -100,7 +119,10 @@ func (s *backendSession) GetPrompt(ctx context.Context, p *mcp.GetPromptParams, 
 	if err != nil {
 		return nil, err
 	}
-	r, _ := result.(*mcp.GetPromptResult)
+	r, ok := result.(*mcp.GetPromptResult)
+	if !ok && result != nil {
+		return nil, fmt.Errorf("unexpected result type %T for prompts/get", result)
+	}
 	return r, nil
 }
 
@@ -119,7 +141,10 @@ func (s *backendSession) Complete(ctx context.Context, p *mcp.CompleteParams, ex
 	if err != nil {
 		return nil, err
 	}
-	r, _ := result.(*mcp.CompleteResult)
+	r, ok := result.(*mcp.CompleteResult)
+	if !ok && result != nil {
+		return nil, fmt.Errorf("unexpected result type %T for completion/complete", result)
+	}
 	return r, nil
 }
 
