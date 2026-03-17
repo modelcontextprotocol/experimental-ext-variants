@@ -52,9 +52,14 @@ type inMemoryBackend struct {
 	mcpMethodHandler mcp.MethodHandler
 }
 
-// captureMCPMethodHandler registers a middleware that captures the inner
-// server's handler chain. Called once; the capture runs synchronously
-// inside Connect before it returns.
+// captureMCPMethodHandler captures a reference to the inner server's
+// handler chain. This is a workaround using AddReceivingMiddleware to
+// gain reference to mcp.Server.receivingMethodHandler_ since the SDK
+// does not expose a public accessor for it.
+// This can be replaced once the SDK exposes a public accessor for the
+// receiving handler chain.
+// The middleware itself is a no-op (returns next unmodified). Called
+// once; the capture runs synchronously during AddReceivingMiddleware.
 func (b *inMemoryBackend) captureMCPMethodHandler() {
 	b.captureOnce.Do(func() {
 		b.server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
