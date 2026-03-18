@@ -6,6 +6,7 @@ package variants
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -46,11 +47,37 @@ type inMemoryBackend struct {
 	server *mcp.Server
 }
 
-// connect creates an in-memory transport pair, connects the inner server,
-// and creates a proxy client to communicate with it. Notifications for
-// progress and logging are forwarded directly to the front session with
-// _meta variant ID injection.
+// captureMCPMethodHandler captures and returns a reference to the inner
+// server's handler chain. This is a workaround using AddReceivingMiddleware
+// to gain a reference to mcp.Server.receivingMethodHandler_, since the SDK
+// does not expose a public accessor for it. This can be replaced once the
+// SDK exposes a public accessor for the receiving handler chain.
+func captureMCPMethodHandler(server *mcp.Server) (mcp.MethodHandler, error) {
+	var handler mcp.MethodHandler
+
+	// The middleware is identity (returns next unmodified), so the handler
+	// chain is unchanged, no extra hop introduced even if called multiple times.
+	server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
+		handler = next
+		return next
+	})
+
+	if handler == nil {
+		return nil, fmt.Errorf("failed to capture backend MCP method handler")
+	}
+	return handler, nil
+}
+
+// connect creates an in-memory transport pair and connects the inner server.
+// Requests bypass the transport via serverHandler to preserve context values.
+// The transport is kept alive only for notification forwarding (progress,
+// logging) from the inner server to the front client.
 func (b *inMemoryBackend) connect(ctx context.Context, variant ServerVariant, frontSession *mcp.ServerSession) (*innerConnection, error) {
+	mcpMethodHandler, err := captureMCPMethodHandler(b.server)
+	if err != nil {
+		return nil, err
+	}
+
 	serverTransport, clientSideTransport := mcp.NewInMemoryTransports()
 
 	serverSession, err := b.server.Connect(ctx, serverTransport, nil)
@@ -87,8 +114,13 @@ func (b *inMemoryBackend) connect(ctx context.Context, variant ServerVariant, fr
 	}
 
 	return &innerConnection{
-		clientSession: clientSession,
+		backendSession: &backendSession{
+			variantID:        variant.ID,
+			serverSession:    serverSession,
+			mcpMethodHandler: mcpMethodHandler,
+		},
 		cleanupFn: func() {
+			clientSession.Close()
 			serverSession.Close()
 		},
 	}, nil
