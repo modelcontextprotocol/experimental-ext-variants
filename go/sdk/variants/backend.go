@@ -6,6 +6,7 @@ package variants
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -51,7 +52,7 @@ type inMemoryBackend struct {
 // to gain a reference to mcp.Server.receivingMethodHandler_, since the SDK
 // does not expose a public accessor for it. This can be replaced once the
 // SDK exposes a public accessor for the receiving handler chain.
-func captureMCPMethodHandler(server *mcp.Server) mcp.MethodHandler {
+func captureMCPMethodHandler(server *mcp.Server) (mcp.MethodHandler, error) {
 	var handler mcp.MethodHandler
 
 	// The middleware is identity (returns next unmodified), so the handler
@@ -60,10 +61,11 @@ func captureMCPMethodHandler(server *mcp.Server) mcp.MethodHandler {
 		handler = next
 		return next
 	})
+
 	if handler == nil {
-		panic("failed to capture MCP Method Handler, it should be called after all other middleware are configured")
+		return nil, fmt.Errorf("failed to capture backend MCP Method Handler.")
 	}
-	return handler
+	return handler, nil
 }
 
 // connect creates an in-memory transport pair and connects the inner server.
@@ -71,7 +73,10 @@ func captureMCPMethodHandler(server *mcp.Server) mcp.MethodHandler {
 // The transport is kept alive only for notification forwarding (progress,
 // logging) from the inner server to the front client.
 func (b *inMemoryBackend) connect(ctx context.Context, variant ServerVariant, frontSession *mcp.ServerSession) (*innerConnection, error) {
-	mcpMethodHandler := captureMCPMethodHandler(b.server)
+	mcpMethodHandler, err := captureMCPMethodHandler(b.server)
+	if err != nil {
+		return nil, err
+	}
 
 	serverTransport, clientSideTransport := mcp.NewInMemoryTransports()
 
