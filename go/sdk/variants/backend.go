@@ -63,7 +63,7 @@ func captureMCPMethodHandler(server *mcp.Server) (mcp.MethodHandler, error) {
 	})
 
 	if handler == nil {
-		return nil, fmt.Errorf("failed to capture backend MCP Method Handler.")
+		return nil, fmt.Errorf("failed to capture backend MCP method handler")
 	}
 	return handler, nil
 }
