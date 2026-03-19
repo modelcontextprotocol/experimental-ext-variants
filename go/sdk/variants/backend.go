@@ -44,8 +44,59 @@ type backend interface {
 // capability changes are needed, this will require the Go MCP SDK to
 // expose generic notification sending on ServerSession.
 type inMemoryBackend struct {
-	server *mcp.Server
+	variantID        string
+	server           *mcp.Server
+	mcpMethodHandler mcp.MethodHandler
 }
+
+// sessionSwappedRequest wraps an existing mcp.Request but returns a
+// different session from GetSession(). The embedded mcp.Request satisfies
+// the unexported isRequest() method required by the interface.
+type sessionSwappedRequest struct {
+	mcp.Request
+	session mcp.Session
+}
+
+func (r *sessionSwappedRequest) GetSession() mcp.Session { return r.session }
+
+// sendingRedirectMiddleware returns a sending middleware that intercepts all
+// outgoing messages from the inner server (notifications and server-to-client
+// requests) and redirects them through the front server's sending handler with
+// the front session swapped in. By swapping the session we route messages
+// through the front connection to the real client.
+//
+// The front session (per-request) is read from context; the sending handler
+// (constant) is read from the Server struct.
+func sendingRedirectMiddleware(variantID string, vs *Server) mcp.Middleware {
+	return func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			frontSession, _ := ctx.Value(frontSessionKeyType{}).(*mcp.ServerSession)
+			if frontSession == nil || vs.frontSendingHandler == nil {
+				return next(ctx, method, req)
+			}
+
+			injectVariantMeta(req.GetParams(), variantID)
+			return vs.frontSendingHandler(ctx, method, &sessionSwappedRequest{
+				Request: req,
+				session: frontSession,
+			})
+		}
+	}
+}
+
+// newInMemoryBackend creates an inMemoryBackend, registers the sending
+// redirect middleware on the inner server, and captures the inner
+// server's handler chain for direct dispatch.
+func newInMemoryBackend(server *mcp.Server, variantID string, vs *Server) *inMemoryBackend {
+	server.AddSendingMiddleware(sendingRedirectMiddleware(variantID, vs))
+	return &inMemoryBackend{
+		variantID:        variantID,
+		server:           server,
+		mcpMethodHandler: captureMCPMethodHandler(server),
+	}
+}
+
+
 
 // captureMCPMethodHandler captures and returns a reference to the inner
 // server's handler chain. This is a workaround using AddReceivingMiddleware
@@ -69,9 +120,10 @@ func captureMCPMethodHandler(server *mcp.Server) (mcp.MethodHandler, error) {
 }
 
 // connect creates an in-memory transport pair and connects the inner server.
-// Requests bypass the transport via serverHandler to preserve context values.
-// The transport is kept alive only for notification forwarding (progress,
-// logging) from the inner server to the front client.
+// Requests bypass the transport via mcpMethodHandler to preserve context
+// values. Notifications are redirected by the sending middleware registered
+// in newInMemoryBackend; the proxy client is kept only for the initialize
+// handshake and to set the inner session's log level.
 func (b *inMemoryBackend) connect(ctx context.Context, variant ServerVariant, frontSession *mcp.ServerSession) (*innerConnection, error) {
 	mcpMethodHandler, err := captureMCPMethodHandler(b.server)
 	if err != nil {
@@ -85,27 +137,15 @@ func (b *inMemoryBackend) connect(ctx context.Context, variant ServerVariant, fr
 		return nil, err
 	}
 
+	// The proxy client exists only to complete the initialize handshake
+	// and to set the inner session's log level. Notification forwarding
+	// is handled by the sending redirect middleware registered in
+	// newInMemoryBackend, which intercepts all notifications before they
+	// reach the transport.
 	client := mcp.NewClient(&mcp.Implementation{
 		Name:    "variant-proxy-client",
 		Version: "1.0.0",
-	}, &mcp.ClientOptions{
-		ProgressNotificationHandler: func(ctx context.Context, req *mcp.ProgressNotificationClientRequest) {
-			if frontSession != nil {
-				injectVariantMeta(req.Params, variant.ID)
-				_ = frontSession.NotifyProgress(ctx, req.Params)
-			}
-		},
-		LoggingMessageHandler: func(ctx context.Context, req *mcp.LoggingMessageRequest) {
-			if frontSession != nil {
-				injectVariantMeta(req.Params, variant.ID)
-				_ = frontSession.Log(ctx, req.Params)
-			}
-		},
-		ToolListChangedHandler:     func(context.Context, *mcp.ToolListChangedRequest) {},
-		ResourceListChangedHandler: func(context.Context, *mcp.ResourceListChangedRequest) {},
-		PromptListChangedHandler:   func(context.Context, *mcp.PromptListChangedRequest) {},
-		ResourceUpdatedHandler:     func(context.Context, *mcp.ResourceUpdatedNotificationRequest) {},
-	})
+	}, nil)
 
 	clientSession, err := client.Connect(ctx, clientSideTransport, nil)
 	if err != nil {
@@ -113,11 +153,19 @@ func (b *inMemoryBackend) connect(ctx context.Context, variant ServerVariant, fr
 		return nil, err
 	}
 
+	// Set the inner session's log level to the lowest so that
+	// ServerSession.Log() does not short-circuit before reaching the
+	// sending middleware. The actual log-level filtering is performed by
+	// the front-facing session when the middleware redirects the
+	// notification. Errors are ignored: if the inner server does not
+	// advertise the Logging capability the call simply fails harmlessly.
+	_ = clientSession.SetLoggingLevel(ctx, &mcp.SetLoggingLevelParams{Level: "debug"})
+
 	return &innerConnection{
 		backendSession: &backendSession{
-			variantID:        variant.ID,
+			variantID:        b.variantID,
 			serverSession:    serverSession,
-			mcpMethodHandler: mcpMethodHandler,
+			mcpMethodHandler: b.mcpMethodHandler,
 		},
 		cleanupFn: func() {
 			clientSession.Close()

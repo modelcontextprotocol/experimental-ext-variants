@@ -7,6 +7,7 @@ package variants
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"sync"
 
@@ -31,10 +32,11 @@ type variantEntry struct {
 // (via [NewStreamableHTTPHandler] with Stateless option), a single set of
 // shared connections is created at construction and reused across all requests.
 type Server struct {
-	impl        *mcp.Implementation
-	variants    []variantEntry
-	rankingFunc RankingFunc
-	shared      *sessionState // non-nil in stateless mode; cleaned up by Close
+	impl                *mcp.Implementation
+	variants            []variantEntry
+	rankingFunc         RankingFunc
+	shared              *sessionState    // non-nil in stateless mode; cleaned up by Close
+	frontSendingHandler mcp.MethodHandler // set by mcpServer(); used by sendingRedirectMiddleware
 }
 
 // NewServer creates a new variant-aware server with no registered variants.
@@ -92,7 +94,7 @@ func (s *Server) addVariant(v ServerVariant, b backend, priority int) *Server {
 //
 // Variant IDs must be unique; registering a duplicate panics.
 func (s *Server) WithVariant(v ServerVariant, mcpServer *mcp.Server, priority int) *Server {
-	return s.addVariant(v, &inMemoryBackend{server: mcpServer}, priority)
+	return s.addVariant(v, newInMemoryBackend(mcpServer, v.ID, s), priority)
 }
 
 // WithHTTPVariant registers a ServerVariant backed by an mcp.Server exposed
@@ -256,7 +258,38 @@ func (s *Server) mcpServer(stateless bool) (*mcp.Server, error) {
 
 	frontServer.AddReceivingMiddleware(s.sessionMiddleware(sessions, shared))
 
+	// Inject the front-facing session into the context so inner servers'
+	// sending middleware can redirect notifications to the real client.
+	frontServer.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			ctx = context.WithValue(ctx, frontSessionKeyType{}, req.GetSession().(*mcp.ServerSession))
+			return next(ctx, method, req)
+		}
+	})
+
+	// Capture the front server's sending method handler once so the
+	// notification redirect middleware can call it without per-request
+	// lock acquisition on the server's sendingMethodHandler_ field.
+	s.frontSendingHandler, err = captureSendingMethodHandler(frontServer)
+	if err != nil {
+		return nil, err
+	}
+
 	return frontServer, nil
+}
+
+// captureSendingMethodHandler captures the server's sending method handler
+// chain using the same middleware trick as captureMCPMethodHandler.
+func captureSendingMethodHandler(server *mcp.Server) (mcp.MethodHandler, error) {
+	var handler mcp.MethodHandler
+	server.AddSendingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
+		handler = next
+		return next
+	})
+	if handler == nil {
+		return nil, fmt.Errorf("failed to capture sending method handler")
+	}
+	return handler, nil
 }
 
 // ---------------------------------------------------------------------------

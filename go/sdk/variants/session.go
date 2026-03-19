@@ -160,6 +160,9 @@ func (ss *sessionState) close() {
 	}
 }
 
+// frontSessionKeyType is the context key for the front-facing ServerSession.
+type frontSessionKeyType struct{}
+
 // injectVariantMeta sets the variant ID in a Params' _meta map,
 // preserving any existing metadata.
 func injectVariantMeta(p mcp.Params, variantID string) {
