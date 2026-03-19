@@ -35,7 +35,7 @@ type Server struct {
 	impl                *mcp.Implementation
 	variants            []variantEntry
 	rankingFunc         RankingFunc
-	shared              *sessionState    // non-nil in stateless mode; cleaned up by Close
+	shared              *sessionState     // non-nil in stateless mode; cleaned up by Close
 	frontSendingHandler mcp.MethodHandler // set by mcpServer(); used by sendingRedirectMiddleware
 }
 
