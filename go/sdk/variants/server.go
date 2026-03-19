@@ -260,16 +260,8 @@ func (s *Server) mcpServer(stateless bool) (*mcp.Server, error) {
 
 	// Inject the front-facing session into the context so inner servers'
 	// sending middleware can redirect notifications to the real client.
-	frontServer.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
-		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
-			ctx = context.WithValue(ctx, frontSessionKeyType{}, req.GetSession().(*mcp.ServerSession))
-			return next(ctx, method, req)
-		}
-	})
+	frontServer.AddReceivingMiddleware(captureFrontSessionMiddleware)
 
-	// Capture the front server's sending method handler once so the
-	// notification redirect middleware can call it without per-request
-	// lock acquisition on the server's sendingMethodHandler_ field.
 	s.frontSendingHandler, err = captureSendingMethodHandler(frontServer)
 	if err != nil {
 		return nil, err
@@ -278,8 +270,21 @@ func (s *Server) mcpServer(stateless bool) (*mcp.Server, error) {
 	return frontServer, nil
 }
 
-// captureSendingMethodHandler captures the server's sending method handler
-// chain using the same middleware trick as captureMCPMethodHandler.
+// captureFrontSessionMiddleware injects the front-facing session into the
+// context so inner servers' sending middleware can redirect notifications
+// and other method calls to the real client.
+func captureFrontSessionMiddleware(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+		ctx = context.WithValue(ctx, frontSessionKeyType{}, req.GetSession().(*mcp.ServerSession))
+		return next(ctx, method, req)
+	}
+}
+
+// captureSendingMethodHandler captures the server's sending method handler.
+// It uses AddSendingMiddleware to work around the lack of a public accessor
+// for mcp.Server.sendingMethodHandler_. Because the middleware is identity
+// (returns next unmodified), the handler chain is unchanged and no extra hop
+// is introduced even if called multiple times.
 func captureSendingMethodHandler(server *mcp.Server) (mcp.MethodHandler, error) {
 	var handler mcp.MethodHandler
 	server.AddSendingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
