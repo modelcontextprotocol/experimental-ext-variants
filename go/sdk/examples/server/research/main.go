@@ -2,7 +2,12 @@
 // at different verbosity levels. Demonstrates how variants can optimize tool
 // descriptions for different context window sizes and use cases.
 //
-// Capability demonstrated: Context budget management, description verbosity.
+// Each tool sends progress notifications and log messages as it works,
+// simulating a deep-research workflow where the client can observe each
+// step (e.g. "Searching arXiv", "Resolving references").
+//
+// Capability demonstrated: Context budget management, description verbosity,
+// notification streaming.
 //
 // Variants:
 //   - deep-research: Verbose multi-paragraph descriptions with usage examples
@@ -31,7 +36,9 @@ import (
 func main() {
 	// Deep-research variant: verbose descriptions with usage examples
 	// for thorough research workflows with large context windows.
-	deepServer := mcp.NewServer(&mcp.Implementation{Name: "research-assistant", Version: "v1.0.0"}, nil)
+	deepServer := mcp.NewServer(&mcp.Implementation{Name: "research-assistant", Version: "v1.0.0"}, &mcp.ServerOptions{
+		Capabilities: &mcp.ServerCapabilities{Logging: &mcp.LoggingCapabilities{}},
+	})
 	mcp.AddTool(deepServer, &mcp.Tool{
 		Name: "search_papers",
 		Description: "Search academic papers across multiple databases including arXiv, Semantic Scholar, and PubMed. " +
@@ -63,7 +70,9 @@ func main() {
 
 	// Quick-lookup variant: concise descriptions for fast Q&A sessions
 	// where context budget is limited.
-	quickServer := mcp.NewServer(&mcp.Implementation{Name: "research-assistant", Version: "v1.0.0"}, nil)
+	quickServer := mcp.NewServer(&mcp.Implementation{Name: "research-assistant", Version: "v1.0.0"}, &mcp.ServerOptions{
+		Capabilities: &mcp.ServerCapabilities{Logging: &mcp.LoggingCapabilities{}},
+	})
 	mcp.AddTool(quickServer, &mcp.Tool{
 		Name:        "search_papers",
 		Description: "Search academic papers by query, with optional year and field filters.",
@@ -79,7 +88,9 @@ func main() {
 
 	// Synthesis variant: balanced descriptions for report generation
 	// workflows that need moderate detail.
-	synthesisServer := mcp.NewServer(&mcp.Implementation{Name: "research-assistant", Version: "v1.0.0"}, nil)
+	synthesisServer := mcp.NewServer(&mcp.Implementation{Name: "research-assistant", Version: "v1.0.0"}, &mcp.ServerOptions{
+		Capabilities: &mcp.ServerCapabilities{Logging: &mcp.LoggingCapabilities{}},
+	})
 	mcp.AddTool(synthesisServer, &mcp.Tool{
 		Name: "search_papers",
 		Description: "Search academic papers across arXiv, Semantic Scholar, and PubMed. " +

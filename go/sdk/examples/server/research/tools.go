@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -27,7 +29,33 @@ type SearchPapersOutput struct {
 	TotalFound int     `json:"totalFound"`
 }
 
-func searchPapers(_ context.Context, _ *mcp.CallToolRequest, in SearchPapersInput) (*mcp.CallToolResult, SearchPapersOutput, error) {
+var databases = []string{"arXiv", "Semantic Scholar", "PubMed"}
+
+func searchPapers(ctx context.Context, req *mcp.CallToolRequest, in SearchPapersInput) (*mcp.CallToolResult, SearchPapersOutput, error) {
+	token := req.Params.GetProgressToken()
+	total := len(databases)
+
+	for i, db := range databases {
+		req.Session.Log(ctx, &mcp.LoggingMessageParams{
+			Level:  "info",
+			Logger: "search_papers",
+			Data:   fmt.Sprintf("Searching %s for %q", db, in.Query),
+		})
+		req.Session.NotifyProgress(ctx, &mcp.ProgressNotificationParams{
+			ProgressToken: token,
+			Progress:      float64(i + 1),
+			Total:         float64(total),
+			Message:       fmt.Sprintf("Searching %s (%d/%d)", db, i+1, total),
+		})
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	req.Session.Log(ctx, &mcp.LoggingMessageParams{
+		Level:  "info",
+		Logger: "search_papers",
+		Data:   fmt.Sprintf("Found 1247 results for %q, returning top 2", in.Query),
+	})
+
 	return nil, SearchPapersOutput{
 		Papers: []Paper{
 			{
@@ -71,7 +99,25 @@ type GetPaperOutput struct {
 	Paper PaperDetail `json:"paper"`
 }
 
-func getPaper(_ context.Context, _ *mcp.CallToolRequest, in GetPaperInput) (*mcp.CallToolResult, GetPaperOutput, error) {
+func getPaper(ctx context.Context, req *mcp.CallToolRequest, in GetPaperInput) (*mcp.CallToolResult, GetPaperOutput, error) {
+	token := req.Params.GetProgressToken()
+	steps := []string{"Fetching metadata", "Resolving references", "Loading citations"}
+
+	for i, step := range steps {
+		req.Session.Log(ctx, &mcp.LoggingMessageParams{
+			Level:  "info",
+			Logger: "get_paper",
+			Data:   fmt.Sprintf("%s for %s", step, in.ID),
+		})
+		req.Session.NotifyProgress(ctx, &mcp.ProgressNotificationParams{
+			ProgressToken: token,
+			Progress:      float64(i + 1),
+			Total:         float64(len(steps)),
+			Message:       fmt.Sprintf("%s (%d/%d)", step, i+1, len(steps)),
+		})
+		time.Sleep(80 * time.Millisecond)
+	}
+
 	return nil, GetPaperOutput{
 		Paper: PaperDetail{
 			ID:         in.ID,
@@ -98,11 +144,30 @@ type SummarizeOutput struct {
 	Style   string `json:"style"`
 }
 
-func summarize(_ context.Context, _ *mcp.CallToolRequest, in SummarizeInput) (*mcp.CallToolResult, SummarizeOutput, error) {
+func summarize(ctx context.Context, req *mcp.CallToolRequest, in SummarizeInput) (*mcp.CallToolResult, SummarizeOutput, error) {
 	style := in.Style
 	if style == "" {
 		style = "abstract"
 	}
+
+	token := req.Params.GetProgressToken()
+	steps := []string{"Analyzing text", "Generating summary"}
+
+	for i, step := range steps {
+		req.Session.Log(ctx, &mcp.LoggingMessageParams{
+			Level:  "info",
+			Logger: "summarize",
+			Data:   fmt.Sprintf("%s (%s style)", step, style),
+		})
+		req.Session.NotifyProgress(ctx, &mcp.ProgressNotificationParams{
+			ProgressToken: token,
+			Progress:      float64(i + 1),
+			Total:         float64(len(steps)),
+			Message:       fmt.Sprintf("%s (%d/%d)", step, i+1, len(steps)),
+		})
+		time.Sleep(80 * time.Millisecond)
+	}
+
 	return nil, SummarizeOutput{
 		Summary: "This paper presents key findings in the field, demonstrating significant improvements over prior work through novel methodology and comprehensive evaluation across multiple benchmarks.",
 		Style:   style,

@@ -30,18 +30,17 @@ type backend interface {
 // inMemoryBackend connects to a co-located *mcp.Server via in-memory
 // transports.
 //
-// Limitation: list-changed and resource-updated notifications from
-// inner servers are silently dropped. The mcp.ServerSession API only
-// exposes NotifyProgress and Log; there is no public method to send
-// tool/resource/prompt list-changed or resource-updated notifications
-// to the front client. This means that if an inner server dynamically
-// adds or removes tools/resources/prompts at runtime, the front
-// client will NOT be notified.
+// The sending redirect middleware intercepts all outgoing messages from
+// the inner server and forwards them through the front session. This
+// covers notifications (progress, log) and server-to-client requests
+// (Elicit, CreateMessage, ListRoots) during request handling.
 //
+// Limitation: async notifications (e.g. tool/resource/prompt
+// list-changed) triggered outside request handling use
+// context.Background() and lack the front session in the context, so
+// the middleware falls through and these notifications are dropped.
 // In practice this is acceptable because inner servers are typically
-// statically configured (tools registered at startup). If dynamic
-// capability changes are needed, this will require the Go MCP SDK to
-// expose generic notification sending on ServerSession.
+// statically configured (tools registered at startup).
 type inMemoryBackend struct {
 	variantID        string
 	server           *mcp.Server
@@ -123,15 +122,27 @@ func (b *inMemoryBackend) connect(ctx context.Context, variant ServerVariant, fr
 		return nil, err
 	}
 
-	// The proxy client exists only to complete the initialize handshake
-	// and to set the inner session's log level. Notification forwarding
-	// is handled by the sending redirect middleware registered in
-	// newInMemoryBackend, which intercepts all notifications before they
-	// reach the transport.
+	// The proxy client completes the initialize handshake and sets the
+	// inner session's log level. It must remain open for the lifetime of
+	// the serverSession — closing it tears down the in-memory transport,
+	// causing the serverSession to shut down. The nop handlers advertise
+	// capabilities so the inner ServerSession doesn't short-circuit
+	// methods like Elicit with "client does not support X". They are
+	// never called because the sending redirect middleware intercepts
+	// all outgoing messages before they reach the transport.
+	nopElicit := func(context.Context, *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+		return nil, nil
+	}
+	nopSampling := func(context.Context, *mcp.CreateMessageRequest) (*mcp.CreateMessageResult, error) {
+		return nil, nil
+	}
 	client := mcp.NewClient(&mcp.Implementation{
 		Name:    "variant-proxy-client",
 		Version: "1.0.0",
-	}, nil)
+	}, &mcp.ClientOptions{
+		ElicitationHandler:   nopElicit,
+		CreateMessageHandler: nopSampling,
+	})
 
 	clientSession, err := client.Connect(ctx, clientSideTransport, nil)
 	if err != nil {
