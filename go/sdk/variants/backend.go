@@ -73,8 +73,6 @@ func sendingRedirectMiddleware(variantID string, vs *Server) mcp.Middleware {
 			if frontSession == nil || vs.frontSendingHandler == nil {
 				return next(ctx, method, req)
 			}
-
-			injectVariantMeta(req.GetParams(), variantID)
 			return vs.frontSendingHandler(ctx, method, &sessionSwappedRequest{
 				Request: req,
 				session: frontSession,
