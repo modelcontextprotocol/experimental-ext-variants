@@ -159,21 +159,9 @@ func enrichError(err error, variantID string) error {
 // List methods
 // ---------------------------------------------------------------------------
 
-// cursorParams is implemented by all list params types that support pagination.
-type cursorParams interface {
-	mcp.Params
-	GetCursor() string
-	SetCursor(string)
-}
-
-// cursorResult is implemented by all list result types that support pagination.
-type cursorResult interface {
-	GetNextCursor() string
-	SetNextCursor(string)
-}
-
 // handleList handles list methods using the generic backend session call method.
 // Implements cursor scoping per SEP-2053: unwraps incoming cursors and wraps outgoing cursors.
+// Uses type switches for type-safe cursor field access.
 func (d *dispatcher) handleList(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 	conn, err := d.getConnection(ctx, req)
 	if err != nil {
@@ -188,14 +176,39 @@ func (d *dispatcher) handleList(ctx context.Context, method string, req mcp.Requ
 	if !isParamsNil(params) {
 		injectVariantMeta(params, variantID)
 
-		// Handle cursor unwrapping if params support it
-		if cp, ok := params.(cursorParams); ok {
-			if cursor := cp.GetCursor(); cursor != "" {
-				innerCursor, err := unwrapCursor(cursor, variantID)
+		// Handle cursor unwrapping using type switch for type-safe field access
+		switch p := params.(type) {
+		case *mcp.ListToolsParams:
+			if p.Cursor != "" {
+				innerCursor, err := unwrapCursor(p.Cursor, variantID)
 				if err != nil {
 					return nil, err
 				}
-				cp.SetCursor(innerCursor)
+				p.Cursor = innerCursor
+			}
+		case *mcp.ListResourcesParams:
+			if p.Cursor != "" {
+				innerCursor, err := unwrapCursor(p.Cursor, variantID)
+				if err != nil {
+					return nil, err
+				}
+				p.Cursor = innerCursor
+			}
+		case *mcp.ListPromptsParams:
+			if p.Cursor != "" {
+				innerCursor, err := unwrapCursor(p.Cursor, variantID)
+				if err != nil {
+					return nil, err
+				}
+				p.Cursor = innerCursor
+			}
+		case *mcp.ListResourceTemplatesParams:
+			if p.Cursor != "" {
+				innerCursor, err := unwrapCursor(p.Cursor, variantID)
+				if err != nil {
+					return nil, err
+				}
+				p.Cursor = innerCursor
 			}
 		}
 	}
@@ -206,10 +219,23 @@ func (d *dispatcher) handleList(ctx context.Context, method string, req mcp.Requ
 		return nil, enrichError(err, variantID)
 	}
 
-	// Handle cursor wrapping in result
-	if cr, ok := result.(cursorResult); ok {
-		if cursor := cr.GetNextCursor(); cursor != "" {
-			cr.SetNextCursor(wrapCursor(cursor, variantID))
+	// Handle cursor wrapping in result using type switch for type-safe field access
+	switch r := result.(type) {
+	case *mcp.ListToolsResult:
+		if r.NextCursor != "" {
+			r.NextCursor = wrapCursor(r.NextCursor, variantID)
+		}
+	case *mcp.ListResourcesResult:
+		if r.NextCursor != "" {
+			r.NextCursor = wrapCursor(r.NextCursor, variantID)
+		}
+	case *mcp.ListPromptsResult:
+		if r.NextCursor != "" {
+			r.NextCursor = wrapCursor(r.NextCursor, variantID)
+		}
+	case *mcp.ListResourceTemplatesResult:
+		if r.NextCursor != "" {
+			r.NextCursor = wrapCursor(r.NextCursor, variantID)
 		}
 	}
 
