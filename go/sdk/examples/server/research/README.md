@@ -2,7 +2,9 @@
 
 A variant-aware MCP server that manages context budget by providing the same research tools (`search_papers`, `get_paper`, `summarize`) at different verbosity levels.
 
-**Pattern demonstrated:** Context budget management with description verbosity control.
+Each tool sends progress notifications and log messages as it works, simulating a deep-research workflow where the client can observe each step (e.g. "Searching arXiv", "Resolving references", "Generating summary").
+
+**Patterns demonstrated:** Context budget management with description verbosity control, notification streaming.
 
 ## Variants
 
