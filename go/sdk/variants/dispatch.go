@@ -29,16 +29,8 @@ func (d *dispatcher) handle(ctx context.Context, method string, req mcp.Request,
 	switch method {
 	case "tools/list", "resources/list", "prompts/list", "resources/templates/list":
 		return d.handleList(ctx, method, req)
-	case "tools/call", "resources/read", "prompts/get":
-		return d.handleCall(ctx, method, req)
-	case "resources/subscribe":
-		return d.handleSubscribe(ctx, req)
-	case "resources/unsubscribe":
-		return d.handleUnsubscribe(ctx, req)
-	case "completion/complete":
-		return d.handleCompletion(ctx, req)
 	default:
-		return next(ctx, method, req)
+		return d.handleReceiveRedirect(ctx, method, req)
 	}
 }
 
@@ -66,16 +58,23 @@ func (d *dispatcher) createInvalidVariantError(ctx context.Context, requestedVar
 	}
 }
 
+// isParamsNil checks if params is nil or a typed-nil (a nil pointer wrapped in an interface).
+// The SDK can produce typed-nil params for requests with no parameters.
+func isParamsNil(params mcp.Params) bool {
+	if params == nil {
+		return true
+	}
+	v := reflect.ValueOf(params)
+	return v.Kind() == reflect.Ptr && v.IsNil()
+}
+
 // variantIDFromMeta extracts the variant ID from the request's _meta field.
 // Returns empty string if no variant is specified. Guards against typed-nil
 // params (e.g. (*ListToolsParams)(nil) wrapped in the mcp.Params interface)
 // which the SDK can produce for requests with no parameters.
 func variantIDFromMeta(req mcp.Request) string {
 	params := req.GetParams()
-	if params == nil {
-		return ""
-	}
-	if v := reflect.ValueOf(params); v.Kind() == reflect.Ptr && v.IsNil() {
+	if isParamsNil(params) {
 		return ""
 	}
 	meta := params.GetMeta()
@@ -160,7 +159,20 @@ func enrichError(err error, variantID string) error {
 // List methods
 // ---------------------------------------------------------------------------
 
-// handleList handles list methods by forwarding to the appropriate variant.
+// cursorParams is implemented by all list params types that support pagination.
+type cursorParams interface {
+	mcp.Params
+	GetCursor() string
+	SetCursor(string)
+}
+
+// cursorResult is implemented by all list result types that support pagination.
+type cursorResult interface {
+	GetNextCursor() string
+	SetNextCursor(string)
+}
+
+// handleList handles list methods using the generic backend session call method.
 // Implements cursor scoping per SEP-2053: unwraps incoming cursors and wraps outgoing cursors.
 func (d *dispatcher) handleList(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 	conn, err := d.getConnection(ctx, req)
@@ -171,104 +183,47 @@ func (d *dispatcher) handleList(ctx context.Context, method string, req mcp.Requ
 	backendSession := conn.backendSession
 	variantID := backendSession.variantID
 	params := req.GetParams()
-	extra := req.GetExtra()
 
-	switch method {
-	case "tools/list":
-		p, _ := params.(*mcp.ListToolsParams)
-		if p != nil {
-			injectVariantMeta(p, variantID)
-			if p.Cursor != "" {
-				innerCursor, err := unwrapCursor(p.Cursor, variantID)
+	// Inject variant metadata and handle cursor unwrapping (guard against typed-nil params)
+	if !isParamsNil(params) {
+		injectVariantMeta(params, variantID)
+
+		// Handle cursor unwrapping if params support it
+		if cp, ok := params.(cursorParams); ok {
+			if cursor := cp.GetCursor(); cursor != "" {
+				innerCursor, err := unwrapCursor(cursor, variantID)
 				if err != nil {
 					return nil, err
 				}
-				p.Cursor = innerCursor
+				cp.SetCursor(innerCursor)
 			}
 		}
-		result, err := backendSession.ListTools(ctx, p, extra)
-		if err != nil {
-			return nil, enrichError(err, variantID)
-		}
-		if result != nil && result.NextCursor != "" {
-			result.NextCursor = wrapCursor(result.NextCursor, variantID)
-		}
-		return result, nil
-
-	case "resources/list":
-		p, _ := params.(*mcp.ListResourcesParams)
-		if p != nil {
-			injectVariantMeta(p, variantID)
-			if p.Cursor != "" {
-				innerCursor, err := unwrapCursor(p.Cursor, variantID)
-				if err != nil {
-					return nil, err
-				}
-				p.Cursor = innerCursor
-			}
-		}
-		result, err := backendSession.ListResources(ctx, p, extra)
-		if err != nil {
-			return nil, enrichError(err, variantID)
-		}
-		if result != nil && result.NextCursor != "" {
-			result.NextCursor = wrapCursor(result.NextCursor, variantID)
-		}
-		return result, nil
-
-	case "prompts/list":
-		p, _ := params.(*mcp.ListPromptsParams)
-		if p != nil {
-			injectVariantMeta(p, variantID)
-			if p.Cursor != "" {
-				innerCursor, err := unwrapCursor(p.Cursor, variantID)
-				if err != nil {
-					return nil, err
-				}
-				p.Cursor = innerCursor
-			}
-		}
-		result, err := backendSession.ListPrompts(ctx, p, extra)
-		if err != nil {
-			return nil, enrichError(err, variantID)
-		}
-		if result != nil && result.NextCursor != "" {
-			result.NextCursor = wrapCursor(result.NextCursor, variantID)
-		}
-		return result, nil
-
-	case "resources/templates/list":
-		p, _ := params.(*mcp.ListResourceTemplatesParams)
-		if p != nil {
-			injectVariantMeta(p, variantID)
-			if p.Cursor != "" {
-				innerCursor, err := unwrapCursor(p.Cursor, variantID)
-				if err != nil {
-					return nil, err
-				}
-				p.Cursor = innerCursor
-			}
-		}
-		result, err := backendSession.ListResourceTemplates(ctx, p, extra)
-		if err != nil {
-			return nil, enrichError(err, variantID)
-		}
-		if result != nil && result.NextCursor != "" {
-			result.NextCursor = wrapCursor(result.NextCursor, variantID)
-		}
-		return result, nil
-
-	default:
-		return nil, errors.New("unsupported list method: " + method)
 	}
+
+	// Generic dispatch - pass entire request object
+	result, err := backendSession.handleReceive(ctx, method, req)
+	if err != nil {
+		return nil, enrichError(err, variantID)
+	}
+
+	// Handle cursor wrapping in result
+	if cr, ok := result.(cursorResult); ok {
+		if cursor := cr.GetNextCursor(); cursor != "" {
+			cr.SetNextCursor(wrapCursor(cursor, variantID))
+		}
+	}
+
+	return result, nil
 }
 
 // ---------------------------------------------------------------------------
-// Call methods
+// Simple methods (no pagination)
 // ---------------------------------------------------------------------------
 
-// handleCall handles call methods (tools/call, resources/read, prompts/get).
-func (d *dispatcher) handleCall(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+// handleReceiveRedirect handles all simple methods (call, subscribe, unsubscribe, completion)
+// that don't require special cursor handling. This consolidates what were previously
+// separate handlers for handleCall, handleSubscribe, handleUnsubscribe, and handleCompletion.
+func (d *dispatcher) handleReceiveRedirect(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 	conn, err := d.getConnection(ctx, req)
 	if err != nil {
 		return nil, err
@@ -277,124 +232,18 @@ func (d *dispatcher) handleCall(ctx context.Context, method string, req mcp.Requ
 	backendSession := conn.backendSession
 	variantID := backendSession.variantID
 	params := req.GetParams()
-	extra := req.GetExtra()
-	var result mcp.Result
 
-	switch method {
-	case "tools/call":
-		raw, _ := params.(*mcp.CallToolParamsRaw)
-		if raw == nil {
-			return nil, &jsonrpc.Error{
-				Code:    jsonrpc.CodeInvalidParams,
-				Message: "missing or invalid tools/call params",
-			}
-		}
-		injectVariantMeta(raw, variantID)
-		result, err = backendSession.CallTool(ctx, raw, extra)
-	case "resources/read":
-		p, _ := params.(*mcp.ReadResourceParams)
-		if p == nil {
-			return nil, &jsonrpc.Error{
-				Code:    jsonrpc.CodeInvalidParams,
-				Message: "missing or invalid resources/read params",
-			}
-		}
-		injectVariantMeta(p, variantID)
-		result, err = backendSession.ReadResource(ctx, p, extra)
-	case "prompts/get":
-		p, _ := params.(*mcp.GetPromptParams)
-		if p == nil {
-			return nil, &jsonrpc.Error{
-				Code:    jsonrpc.CodeInvalidParams,
-				Message: "missing or invalid prompts/get params",
-			}
-		}
-		injectVariantMeta(p, variantID)
-		result, err = backendSession.GetPrompt(ctx, p, extra)
-	default:
-		return nil, errors.New("unsupported call method: " + method)
+	// Inject variant metadata (guard against typed-nil params)
+	if !isParamsNil(params) {
+		injectVariantMeta(params, variantID)
 	}
 
+	// Generic dispatch - pass entire request object
+	result, err := backendSession.handleReceive(ctx, method, req)
 	if err != nil {
 		return nil, enrichError(err, variantID)
 	}
-	return result, nil
-}
 
-// ---------------------------------------------------------------------------
-// Subscription methods
-// ---------------------------------------------------------------------------
-
-// handleSubscribe handles resources/subscribe.
-func (d *dispatcher) handleSubscribe(ctx context.Context, req mcp.Request) (mcp.Result, error) {
-	conn, err := d.getConnection(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-
-	backendSession := conn.backendSession
-	params, _ := req.GetParams().(*mcp.SubscribeParams)
-	if params == nil {
-		return nil, &jsonrpc.Error{
-			Code:    jsonrpc.CodeInvalidParams,
-			Message: "missing or invalid resources/subscribe params",
-		}
-	}
-	injectVariantMeta(params, backendSession.variantID)
-	if err := backendSession.Subscribe(ctx, params, req.GetExtra()); err != nil {
-		return nil, enrichError(err, backendSession.variantID)
-	}
-	return nil, nil
-}
-
-// handleUnsubscribe handles resources/unsubscribe.
-// Per SEP-2053: "Servers MUST continue to accept resources/unsubscribe for
-// existing subscription ids even if the underlying resource is no longer available."
-func (d *dispatcher) handleUnsubscribe(ctx context.Context, req mcp.Request) (mcp.Result, error) {
-	conn, err := d.getConnection(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-
-	backendSession := conn.backendSession
-	params, _ := req.GetParams().(*mcp.UnsubscribeParams)
-	if params == nil {
-		return nil, &jsonrpc.Error{
-			Code:    jsonrpc.CodeInvalidParams,
-			Message: "missing or invalid resources/unsubscribe params",
-		}
-	}
-	injectVariantMeta(params, backendSession.variantID)
-	if err := backendSession.Unsubscribe(ctx, params, req.GetExtra()); err != nil {
-		return nil, enrichError(err, backendSession.variantID)
-	}
-	return nil, nil
-}
-
-// ---------------------------------------------------------------------------
-// Completion
-// ---------------------------------------------------------------------------
-
-// handleCompletion handles completion/complete.
-func (d *dispatcher) handleCompletion(ctx context.Context, req mcp.Request) (mcp.Result, error) {
-	conn, err := d.getConnection(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-
-	backendSession := conn.backendSession
-	params, _ := req.GetParams().(*mcp.CompleteParams)
-	if params == nil {
-		return nil, &jsonrpc.Error{
-			Code:    jsonrpc.CodeInvalidParams,
-			Message: "missing or invalid completion/complete params",
-		}
-	}
-	injectVariantMeta(params, backendSession.variantID)
-	result, err := backendSession.Complete(ctx, params, req.GetExtra())
-	if err != nil {
-		return nil, enrichError(err, backendSession.variantID)
-	}
 	return result, nil
 }
 

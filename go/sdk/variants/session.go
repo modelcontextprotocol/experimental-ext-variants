@@ -6,7 +6,7 @@ package variants
 
 import (
 	"context"
-	"fmt"
+	"reflect"
 	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -42,110 +42,27 @@ type backendSession struct {
 	mcpMethodHandler mcp.MethodHandler
 }
 
-func (s *backendSession) ListTools(ctx context.Context, p *mcp.ListToolsParams, extra *mcp.RequestExtra) (*mcp.ListToolsResult, error) {
-	result, err := s.mcpMethodHandler(ctx, "tools/list", &mcp.ListToolsRequest{Session: s.serverSession, Params: p, Extra: extra})
-	if err != nil {
-		return nil, err
+// handleReceive invokes mcpMethodHandler for any MCP method by modifying the request's
+// Session field to point to the inner server session. This replaces the explicit
+// per-method functions (ListTools, CallTool, etc.) with a single generic handler.
+//
+// The dispatcher is responsible for modifying params (metadata injection,
+// cursor unwrapping) before calling this method.
+func (s *backendSession) handleReceive(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+	// Use reflection to modify the Session field in place. We can't wrap the
+	// request because the SDK's receiving handler does type assertions on the
+	// concrete request type (e.g., *mcp.ServerRequest[*mcp.CallToolParamsRaw]).
+	reqVal := reflect.ValueOf(req)
+	if reqVal.Kind() == reflect.Ptr {
+		reqVal = reqVal.Elem()
 	}
-	r, ok := result.(*mcp.ListToolsResult)
-	if !ok && result != nil {
-		return nil, fmt.Errorf("unexpected result type %T for tools/list", result)
-	}
-	return r, nil
-}
 
-func (s *backendSession) ListResources(ctx context.Context, p *mcp.ListResourcesParams, extra *mcp.RequestExtra) (*mcp.ListResourcesResult, error) {
-	result, err := s.mcpMethodHandler(ctx, "resources/list", &mcp.ListResourcesRequest{Session: s.serverSession, Params: p, Extra: extra})
-	if err != nil {
-		return nil, err
+	sessionField := reqVal.FieldByName("Session")
+	if sessionField.IsValid() && sessionField.CanSet() {
+		sessionField.Set(reflect.ValueOf(s.serverSession))
 	}
-	r, ok := result.(*mcp.ListResourcesResult)
-	if !ok && result != nil {
-		return nil, fmt.Errorf("unexpected result type %T for resources/list", result)
-	}
-	return r, nil
-}
 
-func (s *backendSession) ListPrompts(ctx context.Context, p *mcp.ListPromptsParams, extra *mcp.RequestExtra) (*mcp.ListPromptsResult, error) {
-	result, err := s.mcpMethodHandler(ctx, "prompts/list", &mcp.ListPromptsRequest{Session: s.serverSession, Params: p, Extra: extra})
-	if err != nil {
-		return nil, err
-	}
-	r, ok := result.(*mcp.ListPromptsResult)
-	if !ok && result != nil {
-		return nil, fmt.Errorf("unexpected result type %T for prompts/list", result)
-	}
-	return r, nil
-}
-
-func (s *backendSession) ListResourceTemplates(ctx context.Context, p *mcp.ListResourceTemplatesParams, extra *mcp.RequestExtra) (*mcp.ListResourceTemplatesResult, error) {
-	result, err := s.mcpMethodHandler(ctx, "resources/templates/list", &mcp.ListResourceTemplatesRequest{Session: s.serverSession, Params: p, Extra: extra})
-	if err != nil {
-		return nil, err
-	}
-	r, ok := result.(*mcp.ListResourceTemplatesResult)
-	if !ok && result != nil {
-		return nil, fmt.Errorf("unexpected result type %T for resources/templates/list", result)
-	}
-	return r, nil
-}
-
-func (s *backendSession) CallTool(ctx context.Context, p *mcp.CallToolParamsRaw, extra *mcp.RequestExtra) (*mcp.CallToolResult, error) {
-	result, err := s.mcpMethodHandler(ctx, "tools/call", &mcp.CallToolRequest{Session: s.serverSession, Params: p, Extra: extra})
-	if err != nil {
-		return nil, err
-	}
-	r, ok := result.(*mcp.CallToolResult)
-	if !ok && result != nil {
-		return nil, fmt.Errorf("unexpected result type %T for tools/call", result)
-	}
-	return r, nil
-}
-
-func (s *backendSession) ReadResource(ctx context.Context, p *mcp.ReadResourceParams, extra *mcp.RequestExtra) (*mcp.ReadResourceResult, error) {
-	result, err := s.mcpMethodHandler(ctx, "resources/read", &mcp.ReadResourceRequest{Session: s.serverSession, Params: p, Extra: extra})
-	if err != nil {
-		return nil, err
-	}
-	r, ok := result.(*mcp.ReadResourceResult)
-	if !ok && result != nil {
-		return nil, fmt.Errorf("unexpected result type %T for resources/read", result)
-	}
-	return r, nil
-}
-
-func (s *backendSession) GetPrompt(ctx context.Context, p *mcp.GetPromptParams, extra *mcp.RequestExtra) (*mcp.GetPromptResult, error) {
-	result, err := s.mcpMethodHandler(ctx, "prompts/get", &mcp.GetPromptRequest{Session: s.serverSession, Params: p, Extra: extra})
-	if err != nil {
-		return nil, err
-	}
-	r, ok := result.(*mcp.GetPromptResult)
-	if !ok && result != nil {
-		return nil, fmt.Errorf("unexpected result type %T for prompts/get", result)
-	}
-	return r, nil
-}
-
-func (s *backendSession) Subscribe(ctx context.Context, p *mcp.SubscribeParams, extra *mcp.RequestExtra) error {
-	_, err := s.mcpMethodHandler(ctx, "resources/subscribe", &mcp.SubscribeRequest{Session: s.serverSession, Params: p, Extra: extra})
-	return err
-}
-
-func (s *backendSession) Unsubscribe(ctx context.Context, p *mcp.UnsubscribeParams, extra *mcp.RequestExtra) error {
-	_, err := s.mcpMethodHandler(ctx, "resources/unsubscribe", &mcp.UnsubscribeRequest{Session: s.serverSession, Params: p, Extra: extra})
-	return err
-}
-
-func (s *backendSession) Complete(ctx context.Context, p *mcp.CompleteParams, extra *mcp.RequestExtra) (*mcp.CompleteResult, error) {
-	result, err := s.mcpMethodHandler(ctx, "completion/complete", &mcp.CompleteRequest{Session: s.serverSession, Params: p, Extra: extra})
-	if err != nil {
-		return nil, err
-	}
-	r, ok := result.(*mcp.CompleteResult)
-	if !ok && result != nil {
-		return nil, fmt.Errorf("unexpected result type %T for completion/complete", result)
-	}
-	return r, nil
+	return s.mcpMethodHandler(ctx, method, req)
 }
 
 // sessionState holds all per-session state for one front client.
