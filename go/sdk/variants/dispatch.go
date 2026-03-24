@@ -161,7 +161,6 @@ func enrichError(err error, variantID string) error {
 
 // handleList handles list methods using the generic backend session call method.
 // Implements cursor scoping per SEP-2053: unwraps incoming cursors and wraps outgoing cursors.
-// Uses type switches for type-safe cursor field access.
 func (d *dispatcher) handleList(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 	conn, err := d.getConnection(ctx, req)
 	if err != nil {
@@ -176,40 +175,12 @@ func (d *dispatcher) handleList(ctx context.Context, method string, req mcp.Requ
 	if !isParamsNil(params) {
 		injectVariantMeta(params, variantID)
 
-		// Handle cursor unwrapping using type switch for type-safe field access
-		switch p := params.(type) {
-		case *mcp.ListToolsParams:
-			if p.Cursor != "" {
-				innerCursor, err := unwrapCursor(p.Cursor, variantID)
-				if err != nil {
-					return nil, err
-				}
-				p.Cursor = innerCursor
+		if f := reflect.ValueOf(params).Elem().FieldByName("Cursor"); f.IsValid() && f.String() != "" {
+			innerCursor, err := unwrapCursor(f.String(), variantID)
+			if err != nil {
+				return nil, err
 			}
-		case *mcp.ListResourcesParams:
-			if p.Cursor != "" {
-				innerCursor, err := unwrapCursor(p.Cursor, variantID)
-				if err != nil {
-					return nil, err
-				}
-				p.Cursor = innerCursor
-			}
-		case *mcp.ListPromptsParams:
-			if p.Cursor != "" {
-				innerCursor, err := unwrapCursor(p.Cursor, variantID)
-				if err != nil {
-					return nil, err
-				}
-				p.Cursor = innerCursor
-			}
-		case *mcp.ListResourceTemplatesParams:
-			if p.Cursor != "" {
-				innerCursor, err := unwrapCursor(p.Cursor, variantID)
-				if err != nil {
-					return nil, err
-				}
-				p.Cursor = innerCursor
-			}
+			f.SetString(innerCursor)
 		}
 	}
 
@@ -219,24 +190,8 @@ func (d *dispatcher) handleList(ctx context.Context, method string, req mcp.Requ
 		return nil, enrichError(err, variantID)
 	}
 
-	// Handle cursor wrapping in result using type switch for type-safe field access
-	switch r := result.(type) {
-	case *mcp.ListToolsResult:
-		if r.NextCursor != "" {
-			r.NextCursor = wrapCursor(r.NextCursor, variantID)
-		}
-	case *mcp.ListResourcesResult:
-		if r.NextCursor != "" {
-			r.NextCursor = wrapCursor(r.NextCursor, variantID)
-		}
-	case *mcp.ListPromptsResult:
-		if r.NextCursor != "" {
-			r.NextCursor = wrapCursor(r.NextCursor, variantID)
-		}
-	case *mcp.ListResourceTemplatesResult:
-		if r.NextCursor != "" {
-			r.NextCursor = wrapCursor(r.NextCursor, variantID)
-		}
+	if f := reflect.ValueOf(result).Elem().FieldByName("NextCursor"); f.IsValid() && f.String() != "" {
+		f.SetString(wrapCursor(f.String(), variantID))
 	}
 
 	return result, nil
