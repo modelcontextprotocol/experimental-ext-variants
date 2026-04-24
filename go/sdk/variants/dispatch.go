@@ -58,14 +58,13 @@ func (d *dispatcher) createInvalidVariantError(ctx context.Context, requestedVar
 	}
 }
 
-// isParamsNil checks if params is nil or a typed-nil (a nil pointer wrapped in an interface).
-// The SDK can produce typed-nil params for requests with no parameters.
-func isParamsNil(params mcp.Params) bool {
-	if params == nil {
+// isNilInterface checks if v is nil or a typed-nil (a nil pointer wrapped in an interface).
+func isNilInterface(v any) bool {
+	if v == nil {
 		return true
 	}
-	v := reflect.ValueOf(params)
-	return v.Kind() == reflect.Ptr && v.IsNil()
+	rv := reflect.ValueOf(v)
+	return rv.Kind() == reflect.Ptr && rv.IsNil()
 }
 
 // variantIDFromMeta extracts the variant ID from the request's _meta field.
@@ -74,7 +73,7 @@ func isParamsNil(params mcp.Params) bool {
 // which the SDK can produce for requests with no parameters.
 func variantIDFromMeta(req mcp.Request) string {
 	params := req.GetParams()
-	if isParamsNil(params) {
+	if isNilInterface(params) {
 		return ""
 	}
 	meta := params.GetMeta()
@@ -172,7 +171,7 @@ func (d *dispatcher) handleList(ctx context.Context, method string, req mcp.Requ
 	params := req.GetParams()
 
 	// Inject variant metadata and handle cursor unwrapping (guard against typed-nil params)
-	if !isParamsNil(params) {
+	if !isNilInterface(params) {
 		injectVariantMeta(params, variantID)
 
 		if f := reflect.ValueOf(params).Elem().FieldByName("Cursor"); f.IsValid() && f.String() != "" {
@@ -188,6 +187,9 @@ func (d *dispatcher) handleList(ctx context.Context, method string, req mcp.Requ
 	result, err := backendSession.handleReceive(ctx, method, req)
 	if err != nil {
 		return nil, enrichError(err, variantID)
+	}
+	if isNilInterface(result) {
+		return nil, nil
 	}
 
 	if f := reflect.ValueOf(result).Elem().FieldByName("NextCursor"); f.IsValid() && f.String() != "" {
@@ -215,7 +217,7 @@ func (d *dispatcher) handleReceiveRedirect(ctx context.Context, method string, r
 	params := req.GetParams()
 
 	// Inject variant metadata (guard against typed-nil params)
-	if !isParamsNil(params) {
+	if !isNilInterface(params) {
 		injectVariantMeta(params, variantID)
 	}
 
