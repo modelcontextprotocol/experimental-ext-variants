@@ -50,21 +50,27 @@ type backendSession struct {
 // The dispatcher is responsible for modifying params (metadata injection,
 // cursor unwrapping) before calling this method.
 func (s *backendSession) handleReceive(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
-	// Use reflection to modify the Session field in place. We can't wrap the
-	// request because the SDK's receiving handler does type assertions on the
-	// concrete request type (e.g., *mcp.ServerRequest[*mcp.CallToolParamsRaw]).
+	// Shallow-copy the concrete request struct so we don't mutate the caller's object
+	// while replacing the Session field with our inner server session.
+	// We can't use a wrapper (like the sending side's sessionSwappedRequest) because
+	// the SDK's receiving handler does type assertions on the concrete request type.
 	reqVal := reflect.ValueOf(req)
-	if reqVal.Kind() == reflect.Ptr {
-		reqVal = reqVal.Elem()
+	if reqVal.Kind() != reflect.Ptr {
+		return nil, errors.New("variants: expected pointer to request struct")
 	}
 
-	sessionField := reqVal.FieldByName("Session")
+	// Allocate a new struct of the same concrete type and shallow-copy all fields.
+	copyPtr := reflect.New(reqVal.Elem().Type())
+	copyPtr.Elem().Set(reqVal.Elem())
+
+	// Set Session on the copy to point to the inner server session.
+	sessionField := copyPtr.Elem().FieldByName("Session")
 	if !sessionField.IsValid() || !sessionField.CanSet() {
 		return nil, errors.New("variants: request type missing settable Session field")
 	}
 	sessionField.Set(reflect.ValueOf(s.serverSession))
 
-	return s.mcpMethodHandler(ctx, method, req)
+	return s.mcpMethodHandler(ctx, method, copyPtr.Interface().(mcp.Request))
 }
 
 // sessionState holds all per-session state for one front client.

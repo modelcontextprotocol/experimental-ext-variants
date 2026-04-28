@@ -403,24 +403,22 @@ func TestHandleDirect_MethodRouting(t *testing.T) {
 func TestHandleDirect_MetaInjection(t *testing.T) {
 	const variantID = "v1"
 
+	var receivedMeta mcp.Meta
 	d := newTestDispatcher(variantID, func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
-		meta := req.GetParams().GetMeta()
-		if meta[metaKeyVariant] != variantID {
-			return nil, errors.New("variant meta not injected")
-		}
+		receivedMeta = req.GetParams().GetMeta()
 		return &mcp.CallToolResult{}, nil
 	})
 
-	// Start without variant meta set — handleDirect should inject it.
+	// Start without variant meta — handleDirect should inject it.
 	req := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{
-			Meta: mcp.Meta{metaKeyVariant: variantID},
 			Name: "my-tool",
 		},
 	}
 
 	_, err := d.handleDirect(context.Background(), "tools/call", req)
 	require.NoError(t, err)
+	assert.Equal(t, variantID, receivedMeta[metaKeyVariant], "variant meta should be injected into params")
 }
 
 func TestHandleDirect_ErrorEnrichment(t *testing.T) {
@@ -587,6 +585,7 @@ func TestHandleReceive_SessionInjection(t *testing.T) {
 	_, err := bs.handleReceive(context.Background(), "tools/list", req)
 	require.NoError(t, err)
 	assert.Same(t, targetSession, receivedSession, "handleReceive should replace Session with inner server session")
+	assert.Same(t, originalSession, req.Session, "handleReceive should not mutate the original request")
 }
 
 // ---------------------------------------------------------------------------
