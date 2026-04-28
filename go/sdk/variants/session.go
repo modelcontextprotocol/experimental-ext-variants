@@ -6,6 +6,7 @@ package variants
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"sync"
 
@@ -58,9 +59,10 @@ func (s *backendSession) handleReceive(ctx context.Context, method string, req m
 	}
 
 	sessionField := reqVal.FieldByName("Session")
-	if sessionField.IsValid() && sessionField.CanSet() {
-		sessionField.Set(reflect.ValueOf(s.serverSession))
+	if !sessionField.IsValid() || !sessionField.CanSet() {
+		return nil, errors.New("variants: request type missing settable Session field")
 	}
+	sessionField.Set(reflect.ValueOf(s.serverSession))
 
 	return s.mcpMethodHandler(ctx, method, req)
 }

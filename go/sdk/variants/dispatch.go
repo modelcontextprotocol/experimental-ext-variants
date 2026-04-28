@@ -29,8 +29,12 @@ func (d *dispatcher) handle(ctx context.Context, method string, req mcp.Request,
 	switch method {
 	case "tools/list", "resources/list", "prompts/list", "resources/templates/list":
 		return d.handleList(ctx, method, req)
+	case "tools/call", "resources/read", "prompts/get",
+		"resources/subscribe", "resources/unsubscribe",
+		"completion/complete":
+		return d.handleDirect(ctx, method, req)
 	default:
-		return d.handleReceiveRedirect(ctx, method, req)
+		return next(ctx, method, req)
 	}
 }
 
@@ -66,6 +70,32 @@ func isNilInterface(v any) bool {
 	rv := reflect.ValueOf(v)
 	return rv.Kind() == reflect.Ptr && rv.IsNil()
 }
+
+// The reflect-based field access (cursor unwrap/wrap, metadata injection) calls
+// Elem() to dereference pointers, which panics on non-pointer types. Even without
+// the panic, mutations on a value type would not propagate back to the original
+// request/result. The current SDK satisfies this: all Params and Result types use
+// pointer receivers for their interface marker methods (isParams/isResult), so only
+// pointer types can implement the interfaces. These checks guard against future
+// SDK changes.
+var (
+	errParamsNotPointer = errors.New("variants: expected pointer type for Params, got value type")
+	errResultNotPointer = errors.New("variants: expected pointer type for Result, got value type")
+)
+
+// Compile-time assertions: ensure list param/result types have the Cursor and
+// NextCursor fields that handleList accesses via reflection.
+var (
+	_ = mcp.ListToolsParams{}.Cursor
+	_ = mcp.ListResourcesParams{}.Cursor
+	_ = mcp.ListPromptsParams{}.Cursor
+	_ = mcp.ListResourceTemplatesParams{}.Cursor
+
+	_ = mcp.ListToolsResult{}.NextCursor
+	_ = mcp.ListResourcesResult{}.NextCursor
+	_ = mcp.ListPromptsResult{}.NextCursor
+	_ = mcp.ListResourceTemplatesResult{}.NextCursor
+)
 
 // variantIDFromMeta extracts the variant ID from the request's _meta field.
 // Returns empty string if no variant is specified. Guards against typed-nil
@@ -172,6 +202,9 @@ func (d *dispatcher) handleList(ctx context.Context, method string, req mcp.Requ
 
 	// Inject variant metadata and handle cursor unwrapping (guard against typed-nil params)
 	if !isNilInterface(params) {
+		if reflect.ValueOf(params).Kind() != reflect.Ptr {
+			return nil, errParamsNotPointer
+		}
 		injectVariantMeta(params, variantID)
 
 		if f := reflect.ValueOf(params).Elem().FieldByName("Cursor"); f.IsValid() && f.String() != "" {
@@ -192,6 +225,9 @@ func (d *dispatcher) handleList(ctx context.Context, method string, req mcp.Requ
 		return nil, nil
 	}
 
+	if reflect.ValueOf(result).Kind() != reflect.Ptr {
+		return nil, errResultNotPointer
+	}
 	if f := reflect.ValueOf(result).Elem().FieldByName("NextCursor"); f.IsValid() && f.String() != "" {
 		f.SetString(wrapCursor(f.String(), variantID))
 	}
@@ -203,10 +239,10 @@ func (d *dispatcher) handleList(ctx context.Context, method string, req mcp.Requ
 // Simple methods (no pagination)
 // ---------------------------------------------------------------------------
 
-// handleReceiveRedirect handles all simple methods (call, subscribe, unsubscribe, completion)
+// handleDirect handles all simple methods (call, subscribe, unsubscribe, completion)
 // that don't require special cursor handling. This consolidates what were previously
 // separate handlers for handleCall, handleSubscribe, handleUnsubscribe, and handleCompletion.
-func (d *dispatcher) handleReceiveRedirect(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+func (d *dispatcher) handleDirect(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 	conn, err := d.getConnection(ctx, req)
 	if err != nil {
 		return nil, err
@@ -218,6 +254,9 @@ func (d *dispatcher) handleReceiveRedirect(ctx context.Context, method string, r
 
 	// Inject variant metadata (guard against typed-nil params)
 	if !isNilInterface(params) {
+		if reflect.ValueOf(params).Kind() != reflect.Ptr {
+			return nil, errParamsNotPointer
+		}
 		injectVariantMeta(params, variantID)
 	}
 
