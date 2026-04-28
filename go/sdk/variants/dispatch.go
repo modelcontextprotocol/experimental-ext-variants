@@ -216,7 +216,6 @@ func (d *dispatcher) handleList(ctx context.Context, method string, req mcp.Requ
 		}
 	}
 
-	// Generic dispatch - pass entire request object
 	result, err := backendSession.handleReceive(ctx, method, req)
 	if err != nil {
 		return nil, enrichError(err, variantID)
@@ -240,8 +239,7 @@ func (d *dispatcher) handleList(ctx context.Context, method string, req mcp.Requ
 // ---------------------------------------------------------------------------
 
 // handleDirect handles all simple methods (call, subscribe, unsubscribe, completion)
-// that don't require special cursor handling. This consolidates what were previously
-// separate handlers for handleCall, handleSubscribe, handleUnsubscribe, and handleCompletion.
+// that don't require special cursor handling.
 func (d *dispatcher) handleDirect(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 	conn, err := d.getConnection(ctx, req)
 	if err != nil {
@@ -260,7 +258,6 @@ func (d *dispatcher) handleDirect(ctx context.Context, method string, req mcp.Re
 		injectVariantMeta(params, variantID)
 	}
 
-	// Generic dispatch - pass entire request object
 	result, err := backendSession.handleReceive(ctx, method, req)
 	if err != nil {
 		return nil, enrichError(err, variantID)
