@@ -29,14 +29,10 @@ func (d *dispatcher) handle(ctx context.Context, method string, req mcp.Request,
 	switch method {
 	case "tools/list", "resources/list", "prompts/list", "resources/templates/list":
 		return d.handleList(ctx, method, req)
-	case "tools/call", "resources/read", "prompts/get":
-		return d.handleCall(ctx, method, req)
-	case "resources/subscribe":
-		return d.handleSubscribe(ctx, req)
-	case "resources/unsubscribe":
-		return d.handleUnsubscribe(ctx, req)
-	case "completion/complete":
-		return d.handleCompletion(ctx, req)
+	case "tools/call", "resources/read", "prompts/get",
+		"resources/subscribe", "resources/unsubscribe",
+		"completion/complete":
+		return d.handleDirect(ctx, method, req)
 	default:
 		return next(ctx, method, req)
 	}
@@ -66,16 +62,48 @@ func (d *dispatcher) createInvalidVariantError(ctx context.Context, requestedVar
 	}
 }
 
+// isNilInterface checks if v is nil or a typed-nil (a nil pointer wrapped in an interface).
+func isNilInterface(v any) bool {
+	if v == nil {
+		return true
+	}
+	rv := reflect.ValueOf(v)
+	return rv.Kind() == reflect.Ptr && rv.IsNil()
+}
+
+// The reflect-based field access (cursor unwrap/wrap, metadata injection) calls
+// Elem() to dereference pointers, which panics on non-pointer types. Even without
+// the panic, mutations on a value type would not propagate back to the original
+// request/result. The current SDK satisfies this: all Params and Result types use
+// pointer receivers for their interface marker methods (isParams/isResult), so only
+// pointer types can implement the interfaces. These checks guard against future
+// SDK changes.
+var (
+	errParamsNotPointer = errors.New("variants: expected pointer type for Params, got value type")
+	errResultNotPointer = errors.New("variants: expected pointer type for Result, got value type")
+)
+
+// Compile-time assertions: ensure list param/result types have the Cursor and
+// NextCursor fields that handleList accesses via reflection.
+var (
+	_ = mcp.ListToolsParams{}.Cursor
+	_ = mcp.ListResourcesParams{}.Cursor
+	_ = mcp.ListPromptsParams{}.Cursor
+	_ = mcp.ListResourceTemplatesParams{}.Cursor
+
+	_ = mcp.ListToolsResult{}.NextCursor
+	_ = mcp.ListResourcesResult{}.NextCursor
+	_ = mcp.ListPromptsResult{}.NextCursor
+	_ = mcp.ListResourceTemplatesResult{}.NextCursor
+)
+
 // variantIDFromMeta extracts the variant ID from the request's _meta field.
 // Returns empty string if no variant is specified. Guards against typed-nil
 // params (e.g. (*ListToolsParams)(nil) wrapped in the mcp.Params interface)
 // which the SDK can produce for requests with no parameters.
 func variantIDFromMeta(req mcp.Request) string {
 	params := req.GetParams()
-	if params == nil {
-		return ""
-	}
-	if v := reflect.ValueOf(params); v.Kind() == reflect.Ptr && v.IsNil() {
+	if isNilInterface(params) {
 		return ""
 	}
 	meta := params.GetMeta()
@@ -160,7 +188,7 @@ func enrichError(err error, variantID string) error {
 // List methods
 // ---------------------------------------------------------------------------
 
-// handleList handles list methods by forwarding to the appropriate variant.
+// handleList handles list methods using the generic backend session call method.
 // Implements cursor scoping per SEP-2053: unwraps incoming cursors and wraps outgoing cursors.
 func (d *dispatcher) handleList(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 	conn, err := d.getConnection(ctx, req)
@@ -171,104 +199,48 @@ func (d *dispatcher) handleList(ctx context.Context, method string, req mcp.Requ
 	backendSession := conn.backendSession
 	variantID := backendSession.variantID
 	params := req.GetParams()
-	extra := req.GetExtra()
 
-	switch method {
-	case "tools/list":
-		p, _ := params.(*mcp.ListToolsParams)
-		if p != nil {
-			injectVariantMeta(p, variantID)
-			if p.Cursor != "" {
-				innerCursor, err := unwrapCursor(p.Cursor, variantID)
-				if err != nil {
-					return nil, err
-				}
-				p.Cursor = innerCursor
+	// Inject variant metadata and handle cursor unwrapping (guard against typed-nil params)
+	if !isNilInterface(params) {
+		if reflect.ValueOf(params).Kind() != reflect.Ptr {
+			return nil, errParamsNotPointer
+		}
+		injectVariantMeta(params, variantID)
+
+		if f := reflect.ValueOf(params).Elem().FieldByName("Cursor"); f.IsValid() && f.String() != "" {
+			innerCursor, err := unwrapCursor(f.String(), variantID)
+			if err != nil {
+				return nil, err
 			}
+			f.SetString(innerCursor)
 		}
-		result, err := backendSession.ListTools(ctx, p, extra)
-		if err != nil {
-			return nil, enrichError(err, variantID)
-		}
-		if result != nil && result.NextCursor != "" {
-			result.NextCursor = wrapCursor(result.NextCursor, variantID)
-		}
-		return result, nil
-
-	case "resources/list":
-		p, _ := params.(*mcp.ListResourcesParams)
-		if p != nil {
-			injectVariantMeta(p, variantID)
-			if p.Cursor != "" {
-				innerCursor, err := unwrapCursor(p.Cursor, variantID)
-				if err != nil {
-					return nil, err
-				}
-				p.Cursor = innerCursor
-			}
-		}
-		result, err := backendSession.ListResources(ctx, p, extra)
-		if err != nil {
-			return nil, enrichError(err, variantID)
-		}
-		if result != nil && result.NextCursor != "" {
-			result.NextCursor = wrapCursor(result.NextCursor, variantID)
-		}
-		return result, nil
-
-	case "prompts/list":
-		p, _ := params.(*mcp.ListPromptsParams)
-		if p != nil {
-			injectVariantMeta(p, variantID)
-			if p.Cursor != "" {
-				innerCursor, err := unwrapCursor(p.Cursor, variantID)
-				if err != nil {
-					return nil, err
-				}
-				p.Cursor = innerCursor
-			}
-		}
-		result, err := backendSession.ListPrompts(ctx, p, extra)
-		if err != nil {
-			return nil, enrichError(err, variantID)
-		}
-		if result != nil && result.NextCursor != "" {
-			result.NextCursor = wrapCursor(result.NextCursor, variantID)
-		}
-		return result, nil
-
-	case "resources/templates/list":
-		p, _ := params.(*mcp.ListResourceTemplatesParams)
-		if p != nil {
-			injectVariantMeta(p, variantID)
-			if p.Cursor != "" {
-				innerCursor, err := unwrapCursor(p.Cursor, variantID)
-				if err != nil {
-					return nil, err
-				}
-				p.Cursor = innerCursor
-			}
-		}
-		result, err := backendSession.ListResourceTemplates(ctx, p, extra)
-		if err != nil {
-			return nil, enrichError(err, variantID)
-		}
-		if result != nil && result.NextCursor != "" {
-			result.NextCursor = wrapCursor(result.NextCursor, variantID)
-		}
-		return result, nil
-
-	default:
-		return nil, errors.New("unsupported list method: " + method)
 	}
+
+	result, err := backendSession.handleReceive(ctx, method, req)
+	if err != nil {
+		return nil, enrichError(err, variantID)
+	}
+	if isNilInterface(result) {
+		return nil, nil
+	}
+
+	if reflect.ValueOf(result).Kind() != reflect.Ptr {
+		return nil, errResultNotPointer
+	}
+	if f := reflect.ValueOf(result).Elem().FieldByName("NextCursor"); f.IsValid() && f.String() != "" {
+		f.SetString(wrapCursor(f.String(), variantID))
+	}
+
+	return result, nil
 }
 
 // ---------------------------------------------------------------------------
-// Call methods
+// Simple methods (no pagination)
 // ---------------------------------------------------------------------------
 
-// handleCall handles call methods (tools/call, resources/read, prompts/get).
-func (d *dispatcher) handleCall(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+// handleDirect handles all simple methods (call, subscribe, unsubscribe, completion)
+// that don't require special cursor handling.
+func (d *dispatcher) handleDirect(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 	conn, err := d.getConnection(ctx, req)
 	if err != nil {
 		return nil, err
@@ -277,124 +249,20 @@ func (d *dispatcher) handleCall(ctx context.Context, method string, req mcp.Requ
 	backendSession := conn.backendSession
 	variantID := backendSession.variantID
 	params := req.GetParams()
-	extra := req.GetExtra()
-	var result mcp.Result
 
-	switch method {
-	case "tools/call":
-		raw, _ := params.(*mcp.CallToolParamsRaw)
-		if raw == nil {
-			return nil, &jsonrpc.Error{
-				Code:    jsonrpc.CodeInvalidParams,
-				Message: "missing or invalid tools/call params",
-			}
+	// Inject variant metadata (guard against typed-nil params)
+	if !isNilInterface(params) {
+		if reflect.ValueOf(params).Kind() != reflect.Ptr {
+			return nil, errParamsNotPointer
 		}
-		injectVariantMeta(raw, variantID)
-		result, err = backendSession.CallTool(ctx, raw, extra)
-	case "resources/read":
-		p, _ := params.(*mcp.ReadResourceParams)
-		if p == nil {
-			return nil, &jsonrpc.Error{
-				Code:    jsonrpc.CodeInvalidParams,
-				Message: "missing or invalid resources/read params",
-			}
-		}
-		injectVariantMeta(p, variantID)
-		result, err = backendSession.ReadResource(ctx, p, extra)
-	case "prompts/get":
-		p, _ := params.(*mcp.GetPromptParams)
-		if p == nil {
-			return nil, &jsonrpc.Error{
-				Code:    jsonrpc.CodeInvalidParams,
-				Message: "missing or invalid prompts/get params",
-			}
-		}
-		injectVariantMeta(p, variantID)
-		result, err = backendSession.GetPrompt(ctx, p, extra)
-	default:
-		return nil, errors.New("unsupported call method: " + method)
+		injectVariantMeta(params, variantID)
 	}
 
+	result, err := backendSession.handleReceive(ctx, method, req)
 	if err != nil {
 		return nil, enrichError(err, variantID)
 	}
-	return result, nil
-}
 
-// ---------------------------------------------------------------------------
-// Subscription methods
-// ---------------------------------------------------------------------------
-
-// handleSubscribe handles resources/subscribe.
-func (d *dispatcher) handleSubscribe(ctx context.Context, req mcp.Request) (mcp.Result, error) {
-	conn, err := d.getConnection(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-
-	backendSession := conn.backendSession
-	params, _ := req.GetParams().(*mcp.SubscribeParams)
-	if params == nil {
-		return nil, &jsonrpc.Error{
-			Code:    jsonrpc.CodeInvalidParams,
-			Message: "missing or invalid resources/subscribe params",
-		}
-	}
-	injectVariantMeta(params, backendSession.variantID)
-	if err := backendSession.Subscribe(ctx, params, req.GetExtra()); err != nil {
-		return nil, enrichError(err, backendSession.variantID)
-	}
-	return nil, nil
-}
-
-// handleUnsubscribe handles resources/unsubscribe.
-// Per SEP-2053: "Servers MUST continue to accept resources/unsubscribe for
-// existing subscription ids even if the underlying resource is no longer available."
-func (d *dispatcher) handleUnsubscribe(ctx context.Context, req mcp.Request) (mcp.Result, error) {
-	conn, err := d.getConnection(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-
-	backendSession := conn.backendSession
-	params, _ := req.GetParams().(*mcp.UnsubscribeParams)
-	if params == nil {
-		return nil, &jsonrpc.Error{
-			Code:    jsonrpc.CodeInvalidParams,
-			Message: "missing or invalid resources/unsubscribe params",
-		}
-	}
-	injectVariantMeta(params, backendSession.variantID)
-	if err := backendSession.Unsubscribe(ctx, params, req.GetExtra()); err != nil {
-		return nil, enrichError(err, backendSession.variantID)
-	}
-	return nil, nil
-}
-
-// ---------------------------------------------------------------------------
-// Completion
-// ---------------------------------------------------------------------------
-
-// handleCompletion handles completion/complete.
-func (d *dispatcher) handleCompletion(ctx context.Context, req mcp.Request) (mcp.Result, error) {
-	conn, err := d.getConnection(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-
-	backendSession := conn.backendSession
-	params, _ := req.GetParams().(*mcp.CompleteParams)
-	if params == nil {
-		return nil, &jsonrpc.Error{
-			Code:    jsonrpc.CodeInvalidParams,
-			Message: "missing or invalid completion/complete params",
-		}
-	}
-	injectVariantMeta(params, backendSession.variantID)
-	result, err := backendSession.Complete(ctx, params, req.GetExtra())
-	if err != nil {
-		return nil, enrichError(err, backendSession.variantID)
-	}
 	return result, nil
 }
 
