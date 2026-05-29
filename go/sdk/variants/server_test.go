@@ -387,6 +387,71 @@ func TestIntegration_HTTP_Stateless(t *testing.T) {
 	assert.NotEmpty(t, result.Content)
 }
 
+// TestUnionCapabilities_MergesExtensions verifies that unionCapabilities
+// merges Extensions from multiple inner servers using first-wins semantics.
+func TestUnionCapabilities_MergesExtensions(t *testing.T) {
+	caps := []*mcp.ServerCapabilities{
+		{
+			Extensions: map[string]any{
+				"io.modelcontextprotocol/skills": map[string]any{},
+			},
+		},
+		{
+			Extensions: map[string]any{
+				"io.modelcontextprotocol/skills": map[string]any{"overridden": true},
+				"io.modelcontextprotocol/other":  map[string]any{"key": "val"},
+			},
+		},
+		{},
+	}
+
+	union := unionCapabilities(caps)
+
+	require.NotNil(t, union.Extensions)
+	assert.Contains(t, union.Extensions, "io.modelcontextprotocol/skills")
+	assert.Contains(t, union.Extensions, "io.modelcontextprotocol/other")
+
+	// First-wins: the first variant's value should be kept.
+	skillsExt, ok := union.Extensions["io.modelcontextprotocol/skills"].(map[string]any)
+	require.True(t, ok)
+	assert.Empty(t, skillsExt, "first variant's empty map should win over second variant's")
+}
+
+// TestIntegration_ExtensionsAdvertised verifies that extensions registered on
+// inner variant servers are advertised to clients in the InitializeResult.
+func TestIntegration_ExtensionsAdvertised(t *testing.T) {
+	codingServer := mcp.NewServer(
+		&mcp.Implementation{Name: "coding", Version: "v1"},
+		&mcp.ServerOptions{
+			Capabilities: func() *mcp.ServerCapabilities {
+				caps := &mcp.ServerCapabilities{}
+				caps.AddExtension("io.modelcontextprotocol/skills", nil)
+				return caps
+			}(),
+		},
+	)
+	mcp.AddTool(codingServer, &mcp.Tool{Name: "analyze_code", Description: "Static analysis"}, analyzeCode)
+
+	compactServer := mcp.NewServer(
+		&mcp.Implementation{Name: "compact", Version: "v1"},
+		nil,
+	)
+	mcp.AddTool(compactServer, &mcp.Tool{Name: "summarize", Description: "Summarize text"}, summarize)
+
+	vs := NewServer(&mcp.Implementation{Name: "test", Version: "1.0.0"}).
+		WithVariant(ServerVariant{ID: "coding", Description: "Coding", Status: Stable}, codingServer, 0).
+		WithVariant(ServerVariant{ID: "compact", Description: "Compact", Status: Stable}, compactServer, 1)
+
+	session := connectTestClient(t, vs, nil)
+
+	initResult := session.InitializeResult()
+	require.NotNil(t, initResult)
+	require.NotNil(t, initResult.Capabilities)
+	require.NotNil(t, initResult.Capabilities.Extensions,
+		"extensions from inner servers should be advertised in InitializeResult")
+	assert.Contains(t, initResult.Capabilities.Extensions, "io.modelcontextprotocol/skills")
+}
+
 // ---------------------------------------------------------------------------
 // Test tool handlers
 // ---------------------------------------------------------------------------
