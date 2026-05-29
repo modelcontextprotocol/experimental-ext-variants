@@ -378,8 +378,8 @@ func (s *Server) enrichInitResult(ctx context.Context, result mcp.Result, req mc
 //     one inner server supports it.
 //   - Completions, Logging: marker capabilities (empty structs). Advertised
 //     if any variant advertises them; the first non-nil value is kept.
-//   - Experimental: keys are merged into a single map. The first variant to
-//     register a given key wins; later duplicates are ignored.
+//   - Experimental, Extensions: keys are merged into a single map. The first
+//     variant to register a given key wins; later duplicates are ignored.
 func unionCapabilities(allCaps []*mcp.ServerCapabilities) *mcp.ServerCapabilities {
 	union := &mcp.ServerCapabilities{}
 
@@ -424,6 +424,17 @@ func unionCapabilities(allCaps []*mcp.ServerCapabilities) *mcp.ServerCapabilitie
 			for k, v := range caps.Experimental {
 				if _, exists := union.Experimental[k]; !exists {
 					union.Experimental[k] = v
+				}
+			}
+		}
+
+		if caps.Extensions != nil {
+			if union.Extensions == nil {
+				union.Extensions = make(map[string]any)
+			}
+			for k, v := range caps.Extensions {
+				if _, exists := union.Extensions[k]; !exists {
+					union.Extensions[k] = v
 				}
 			}
 		}
